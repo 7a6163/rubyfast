@@ -2,8 +2,12 @@
 name = "rubyfast"
 version = "1.1.0"
 edition = "2021"
-description = "A Ruby performance linter rewritten in Rust"
+description = "A Ruby performance linter rewritten in Rust — detects 19 common anti-patterns, ~100x faster than the original fasterer gem"
 license = "MIT"
+repository = "https://github.com/7a6163/rubyfast"
+homepage = "https://github.com/7a6163/rubyfast"
+keywords = ["ruby", "linter", "performance", "static-analysis"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 lib-ruby-parser = "4.0"
