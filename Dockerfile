@@ -7,7 +7,7 @@ COPY src/ src/
 RUN cargo build --release && strip target/release/rubyfast
 
 # -----------------------------------------------------------
-FROM gcr.io/distroless/cc-debian13:nonroot
+FROM gcr.io/distroless/cc-debian13:debug
 
 COPY --from=builder /build/target/release/rubyfast /usr/local/bin/rubyfast
 
