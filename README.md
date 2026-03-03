@@ -114,6 +114,49 @@ exclude_paths:
 
 The config file is auto-discovered by walking up from the scan directory. `.rubyfast.yml` takes precedence if both exist.
 
+## CI/CD Integration
+
+### GitHub Action
+
+```yaml
+- uses: 7a6163/rubyfast-action@v1
+```
+
+With [reviewdog](https://github.com/reviewdog/reviewdog) inline PR comments:
+
+```yaml
+rubyfast:
+  runs-on: ubuntu-latest
+  permissions:
+    contents: read
+    checks: write
+    pull-requests: write
+  steps:
+    - uses: actions/checkout@v4
+    - uses: 7a6163/rubyfast-action@v1
+      with:
+        reviewdog: "true"
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        reviewdog-reporter: github-pr-review
+```
+
+See [rubyfast-action](https://github.com/7a6163/rubyfast-action) for all options.
+
+### GitLab CI
+
+```yaml
+rubyfast:
+  image: ghcr.io/7a6163/rubyfast:latest
+  script:
+    - rubyfast .
+```
+
+### Docker
+
+```bash
+docker run --rm -v $(pwd):/workspace ghcr.io/7a6163/rubyfast:latest .
+```
+
 ## Benchmark
 
 Compared against the original [fasterer](https://github.com/DamirSvrtan/fasterer) Ruby gem (v0.11.0) using [hyperfine](https://github.com/sharkdp/hyperfine). Measured on Apple Silicon, macOS.
