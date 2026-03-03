@@ -1,0 +1,9 @@
+target/
+.git/
+.github/
+.claude/
+.vscode/
+tests/
+*.md
+!README.md
+LICENSE
