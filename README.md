@@ -146,7 +146,9 @@ See [rubyfast-action](https://github.com/7a6163/rubyfast-action) for all options
 
 ```yaml
 rubyfast:
-  image: ghcr.io/7a6163/rubyfast:latest
+  image:
+    name: ghcr.io/7a6163/rubyfast:latest
+    entrypoint: [""]
   script:
     - rubyfast .
 ```
