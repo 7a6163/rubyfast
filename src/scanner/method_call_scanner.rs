@@ -49,7 +49,8 @@ pub fn scan_block(block: &Block) -> Vec<Offense> {
     check_each_with_index(send, &mut offenses);
     check_include_vs_cover(send, &mut offenses);
     check_gsub_vs_tr(send, &mut offenses);
-    check_fetch_with_argument(send, &mut offenses);
+    // NOTE: check_fetch_with_argument is intentionally excluded here.
+    // If fetch already has a block, the rule doesn't apply.
     check_hash_merge_bang(send, &mut offenses);
 
     offenses
@@ -424,6 +425,8 @@ mod tests {
         offenses
     }
 
+    /// Walk AST matching real analyzer behavior: Block's inner Send is NOT
+    /// visited by scan_send (only scan_block handles it).
     fn walk_for_offenses(node: &Node, offenses: &mut Vec<Offense>) {
         match node {
             Node::Send(s) => {
@@ -431,14 +434,32 @@ mod tests {
                     offenses.extend(scan_send_on_block(s, recv_block));
                 }
                 offenses.extend(scan_send(s));
+                for child in node_children(node) {
+                    walk_for_offenses(child, offenses);
+                }
             }
             Node::Block(b) => {
                 offenses.extend(scan_block(b));
+                if let Node::Send(s) = b.call.as_ref() {
+                    if let Some(recv) = &s.recv {
+                        walk_for_offenses(recv, offenses);
+                    }
+                    for arg in &s.args {
+                        walk_for_offenses(arg, offenses);
+                    }
+                }
+                if let Some(args) = &b.args {
+                    walk_for_offenses(args, offenses);
+                }
+                if let Some(body) = &b.body {
+                    walk_for_offenses(body, offenses);
+                }
             }
-            _ => {}
-        }
-        for child in node_children(node) {
-            walk_for_offenses(child, offenses);
+            _ => {
+                for child in node_children(node) {
+                    walk_for_offenses(child, offenses);
+                }
+            }
         }
     }
 
@@ -486,6 +507,14 @@ mod tests {
     fn fetch_two_args() {
         let o = parse_and_collect(b"h.fetch(:key, [])");
         assert!(o
+            .iter()
+            .any(|x| x.kind == OffenseKind::FetchWithArgumentVsBlock));
+    }
+
+    #[test]
+    fn fetch_with_block_no_fire() {
+        let o = parse_and_collect(b"Rails.cache.fetch('key', expires_in: 1.hour) { compute }");
+        assert!(!o
             .iter()
             .any(|x| x.kind == OffenseKind::FetchWithArgumentVsBlock));
     }

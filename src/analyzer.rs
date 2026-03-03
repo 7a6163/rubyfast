@@ -2,7 +2,7 @@ use std::path::Path;
 
 use lib_ruby_parser::{ErrorLevel, Node, Parser};
 
-use crate::ast_helpers::{byte_offset_to_line, node_children};
+use crate::ast_helpers::{byte_offset_to_line, for_each_child};
 use crate::comment_directives::build_disabled_set;
 use crate::config::Config;
 use crate::offense::Offense;
@@ -78,7 +78,7 @@ pub fn analyze_file(path: &Path, config: &Config) -> Result<AnalysisResult, Pars
         }
     };
 
-    let disabled_set = build_disabled_set(&result.comments, &source_clone);
+    let disabled_set = build_disabled_set(&result.comments, &source_clone, &newline_positions);
 
     let mut offenses = Vec::new();
     walk_node(&ast, &mut offenses, &source_clone);
@@ -109,33 +109,26 @@ fn walk_node(node: &Node, offenses: &mut Vec<Offense>, source: &[u8]) {
     match node {
         Node::For(f) => {
             offenses.extend(for_loop_scanner::scan(f, source));
-            for child in node_children(node) {
-                walk_node(child, offenses, source);
-            }
+            for_each_child(node, |child| walk_node(child, offenses, source));
         }
         Node::RescueBody(rb) => {
             offenses.extend(rescue_scanner::scan(rb));
-            for child in node_children(node) {
-                walk_node(child, offenses, source);
-            }
+            for_each_child(node, |child| walk_node(child, offenses, source));
         }
         Node::Def(d) => {
             offenses.extend(method_definition_scanner::scan(d));
-            for child in node_children(node) {
-                walk_node(child, offenses, source);
-            }
+            for_each_child(node, |child| walk_node(child, offenses, source));
         }
         Node::Send(s) => {
             if let Some(Node::Block(recv_block)) = s.recv.as_deref() {
                 offenses.extend(method_call_scanner::scan_send_on_block(s, recv_block));
             }
             offenses.extend(method_call_scanner::scan_send(s));
-            for child in node_children(node) {
-                walk_node(child, offenses, source);
-            }
+            for_each_child(node, |child| walk_node(child, offenses, source));
         }
         Node::Block(b) => {
             offenses.extend(method_call_scanner::scan_block(b));
+            // Walk children manually to skip the inner Send (avoids double-scanning).
             if let Node::Send(s) = b.call.as_ref() {
                 if let Some(recv) = &s.recv {
                     walk_node(recv, offenses, source);
@@ -152,9 +145,7 @@ fn walk_node(node: &Node, offenses: &mut Vec<Offense>, source: &[u8]) {
             }
         }
         _ => {
-            for child in node_children(node) {
-                walk_node(child, offenses, source);
-            }
+            for_each_child(node, |child| walk_node(child, offenses, source));
         }
     }
 }

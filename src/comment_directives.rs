@@ -21,7 +21,7 @@ impl DisabledSet {
     }
 }
 
-/// Build a DisabledSet from parser comments and source bytes.
+/// Build a DisabledSet from parser comments, source bytes, and pre-computed newline positions.
 ///
 /// Supports:
 /// - `# rubyfast:disable rule` or `# fasterer:disable rule` — trailing (same line) or block start
@@ -29,14 +29,11 @@ impl DisabledSet {
 /// - `# rubyfast:enable rule` — ends a block disable
 /// - `# rubyfast:disable all` — disable all rules
 /// - `# rubyfast:disable rule1, rule2` — multiple rules
-pub fn build_disabled_set(comments: &[Comment], source: &[u8]) -> DisabledSet {
-    let newline_positions: Vec<usize> = source
-        .iter()
-        .enumerate()
-        .filter(|(_, &b)| b == b'\n')
-        .map(|(i, _)| i)
-        .collect();
-
+pub fn build_disabled_set(
+    comments: &[Comment],
+    source: &[u8],
+    newline_positions: &[usize],
+) -> DisabledSet {
     let total_lines = newline_positions.len() + 1;
 
     let mut all_disabled_lines = HashSet::new();
@@ -49,7 +46,7 @@ pub fn build_disabled_set(comments: &[Comment], source: &[u8]) -> DisabledSet {
     for comment in comments {
         let begin = comment.location.begin;
         let end = comment.location.end;
-        let comment_line = byte_offset_to_line(&newline_positions, begin);
+        let comment_line = byte_offset_to_line(newline_positions, begin);
         let comment_text = &source[begin..end.min(source.len())];
         let comment_str = String::from_utf8_lossy(comment_text);
 
@@ -237,7 +234,13 @@ mod tests {
     fn parse_and_build(source: &str) -> DisabledSet {
         let bytes = source.as_bytes().to_vec();
         let result = lib_ruby_parser::Parser::new(bytes.clone(), Default::default()).do_parse();
-        build_disabled_set(&result.comments, &bytes)
+        let newline_positions: Vec<usize> = bytes
+            .iter()
+            .enumerate()
+            .filter(|(_, &b)| b == b'\n')
+            .map(|(i, _)| i)
+            .collect();
+        build_disabled_set(&result.comments, &bytes, &newline_positions)
     }
 
     #[test]

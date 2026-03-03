@@ -49,12 +49,13 @@ fn node_contains_block_call(node: &Node, block_name: &str) -> bool {
             }
         }
     }
-    for child in crate::ast_helpers::node_children(node) {
-        if node_contains_block_call(child, block_name) {
-            return true;
+    let mut found = false;
+    crate::ast_helpers::for_each_child(node, |child| {
+        if !found && node_contains_block_call(child, block_name) {
+            found = true;
         }
-    }
-    false
+    });
+    found
 }
 
 /// `def name; @name; end` → use `attr_reader :name`.

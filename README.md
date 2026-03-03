@@ -24,9 +24,48 @@ rubyfast path/to/ruby/project
 
 # Auto-fix safe offenses in-place
 rubyfast --fix path/to/ruby/project
+
+# Choose output format
+rubyfast --format file path/to/project   # group by file (default)
+rubyfast --format rule path/to/project   # group by rule
+rubyfast --format plain path/to/project  # one per line (for CI/grep/reviewdog)
 ```
 
 Exit code `0` if no offenses, `1` if any offenses found.
+
+## Output Formats
+
+### `--format file` (default)
+
+Groups offenses by file path — compact and easy to scan:
+
+```
+app/controllers/concerns/lottery_common.rb
+  L13  fetch_with_argument_vs_block
+  L94  fetch_with_argument_vs_block
+
+app/controllers/api/v1/health_articles_controller.rb
+  L11  fetch_with_argument_vs_block
+```
+
+### `--format rule`
+
+Groups offenses by rule — useful for understanding which patterns are most common:
+
+```
+Hash#fetch with second argument is slower than Hash#fetch with block. (3 offenses)
+  app/controllers/api/v1/health_articles_controller.rb:11
+  app/controllers/concerns/lottery_common.rb:13
+  app/controllers/concerns/lottery_common.rb:94
+```
+
+### `--format plain`
+
+One offense per line — suitable for grep, reviewdog, and CI pipelines:
+
+```
+app/controllers/api/v1/health_articles_controller.rb:11 Hash#fetch with second argument is slower than Hash#fetch with block.
+```
 
 ## Auto-fix
 
@@ -122,7 +161,7 @@ The config file is auto-discovered by walking up from the scan directory. `.ruby
 - uses: 7a6163/rubyfast-action@v1
 ```
 
-With [reviewdog](https://github.com/reviewdog/reviewdog) inline PR comments:
+With [reviewdog](https://github.com/reviewdog/reviewdog) inline PR comments (uses `--format plain` internally):
 
 ```yaml
 rubyfast:

@@ -1,11 +1,91 @@
+use std::collections::BTreeMap;
+
 use colored::Colorize;
 
 use crate::analyzer::ParseError;
+use crate::cli::OutputFormat;
 use crate::file_traverser::TraversalResult;
+use crate::offense::OffenseKind;
 
-/// Print analysis results to stdout, matching original fasterer format.
-pub fn print_results(result: &TraversalResult) {
-    // Print offenses grouped by file
+/// Print analysis results using the selected output format.
+pub fn print_results(result: &TraversalResult, format: &OutputFormat) {
+    match format {
+        OutputFormat::File => print_results_by_file(result),
+        OutputFormat::Rule => print_results_by_rule(result),
+        OutputFormat::Plain => print_results_plain(result),
+    }
+
+    if !result.parse_errors.is_empty() {
+        print_parse_errors(&result.parse_errors);
+    }
+
+    print_statistics(result);
+}
+
+/// `--format file` — group offenses by file path.
+///
+/// ```text
+/// app/controllers/concerns/lottery_common.rb
+///   L13  fetch_with_argument_vs_block
+///   L94  fetch_with_argument_vs_block
+/// ```
+fn print_results_by_file(result: &TraversalResult) {
+    for analysis in &result.results {
+        if analysis.offenses.is_empty() {
+            continue;
+        }
+        println!("{}", analysis.path.bold());
+        for offense in &analysis.offenses {
+            println!(
+                "  {}  {}",
+                format!("L{}", offense.line).cyan(),
+                offense.kind.config_key()
+            );
+        }
+        println!();
+    }
+}
+
+/// `--format rule` — group offenses by rule kind.
+///
+/// ```text
+/// Hash#fetch with second argument is slower than Hash#fetch with block. (5 offenses)
+///   app/controllers/api/v1/health_articles_controller.rb:11
+///   app/controllers/concerns/lottery_common.rb:13
+/// ```
+fn print_results_by_rule(result: &TraversalResult) {
+    let mut grouped: BTreeMap<OffenseKind, Vec<(String, usize)>> = BTreeMap::new();
+
+    for analysis in &result.results {
+        for offense in &analysis.offenses {
+            grouped
+                .entry(offense.kind)
+                .or_default()
+                .push((analysis.path.clone(), offense.line));
+        }
+    }
+
+    for (kind, locations) in &grouped {
+        let count = locations.len();
+        println!(
+            "{} ({} {})",
+            kind.explanation().yellow(),
+            count,
+            pluralize("offense", count)
+        );
+        for (path, line) in locations {
+            println!("  {}:{}", path, line);
+        }
+        println!();
+    }
+}
+
+/// `--format plain` — one offense per line (original format, for grep/reviewdog).
+///
+/// ```text
+/// app/controllers/api/v1/health_articles_controller.rb:11 Hash#fetch with second argument ...
+/// ```
+fn print_results_plain(result: &TraversalResult) {
     for analysis in &result.results {
         if analysis.offenses.is_empty() {
             continue;
@@ -16,14 +96,6 @@ pub fn print_results(result: &TraversalResult) {
         }
         println!();
     }
-
-    // Print parse errors if any
-    if !result.parse_errors.is_empty() {
-        print_parse_errors(&result.parse_errors);
-    }
-
-    // Print statistics
-    print_statistics(result);
 }
 
 fn print_parse_errors(errors: &[ParseError]) {
@@ -72,21 +144,56 @@ fn print_statistics(result: &TraversalResult) {
 }
 
 /// Print results when --fix mode is active.
-pub fn print_fix_results(result: &TraversalResult, total_fixed: usize, total_errors: usize) {
-    // Print unfixable offenses (those without fixes)
-    for analysis in &result.results {
-        for offense in &analysis.offenses {
-            if offense.fix.is_none() {
-                let location = format!("{}:{}", analysis.path, offense.line);
-                println!("{} {}.", location.red(), offense.kind.explanation());
-            }
-        }
+pub fn print_fix_results(
+    result: &TraversalResult,
+    total_fixed: usize,
+    total_errors: usize,
+    format: &OutputFormat,
+) {
+    // Print unfixable offenses using the selected format
+    let unfixable_result = filter_unfixable(result);
+    match format {
+        OutputFormat::File => print_results_by_file(&unfixable_result),
+        OutputFormat::Rule => print_results_by_rule(&unfixable_result),
+        OutputFormat::Plain => print_results_plain(&unfixable_result),
     }
 
     if !result.parse_errors.is_empty() {
         print_parse_errors(&result.parse_errors);
     }
 
+    print_fix_statistics(result, total_fixed, total_errors);
+}
+
+/// Build a TraversalResult containing only unfixable offenses.
+fn filter_unfixable(result: &TraversalResult) -> TraversalResult {
+    use crate::analyzer::AnalysisResult;
+
+    let results = result
+        .results
+        .iter()
+        .map(|analysis| {
+            let offenses = analysis
+                .offenses
+                .iter()
+                .filter(|o| o.fix.is_none())
+                .cloned()
+                .collect();
+            AnalysisResult {
+                path: analysis.path.clone(),
+                offenses,
+            }
+        })
+        .collect();
+
+    TraversalResult {
+        results,
+        parse_errors: vec![],
+        files_inspected: result.files_inspected,
+    }
+}
+
+fn print_fix_statistics(result: &TraversalResult, total_fixed: usize, total_errors: usize) {
     let files = result.files_inspected;
     let offenses = result.total_offenses();
     let fixable: usize = result

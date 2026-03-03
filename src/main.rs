@@ -63,9 +63,9 @@ fn main() {
             }
         }
 
-        print_fix_results(&result, total_fixed, total_errors);
+        print_fix_results(&result, total_fixed, total_errors, &cli.format);
     } else {
-        print_results(&result);
+        print_results(&result, &cli.format);
     }
 
     if cli.fix {

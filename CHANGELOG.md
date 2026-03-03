@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.1.0] - 2026-03-03
+
+### Added
+
+- `--format` flag to control output grouping: `file` (default), `rule`, or `plain`
+  - `--format file` groups offenses under file paths with line numbers
+  - `--format rule` groups offenses by rule kind with offense counts
+  - `--format plain` outputs one offense per line (original format, for grep/reviewdog/CI)
+
+### Fixed
+
+- False positive: `fetch` calls with an existing block (e.g. `Rails.cache.fetch(key, opts) { ... }`) no longer trigger `fetch_with_argument_vs_block`
+
+## [1.0.0] - 2026-03-03
+
+### Changed
+
+- Bump to stable 1.0.0 release
+
 ## [0.1.0] - 2026-03-03
 
 ### Added

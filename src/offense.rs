@@ -3,7 +3,7 @@ use std::fmt;
 use crate::fix::Fix;
 
 /// All 19 performance offense kinds detected by fasterer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum OffenseKind {
     ShuffleFirstVsSample,
     SelectFirstVsDetect,

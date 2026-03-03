@@ -25,14 +25,6 @@ pub fn receiver_as_send(recv: &Option<Box<Node>>) -> Option<&Send> {
     }
 }
 
-/// Check if a Block node's call is a Send with a given method name.
-pub fn block_call_method_name(block: &Block) -> Option<&str> {
-    match block.call.as_ref() {
-        Node::Send(s) => Some(&s.method_name),
-        _ => None,
-    }
-}
-
 /// Extract the Send from a Block's call field.
 pub fn block_call_as_send(block: &Block) -> Option<&Send> {
     match block.call.as_ref() {
@@ -189,38 +181,44 @@ pub fn body_expressions(body: &Option<Box<Node>>) -> Vec<&Node> {
 }
 
 /// Collect all direct child nodes of a given node.
-/// This replaces the private `inner_ref()` method.
+/// Prefer `for_each_child` in hot paths to avoid Vec allocation.
 pub fn node_children(node: &Node) -> Vec<&Node> {
     let mut children = Vec::new();
-    push_children(node, &mut children);
+    for_each_child(node, |child| children.push(child));
     children
 }
 
-fn push_opt<'a>(opt: &'a Option<Box<Node>>, out: &mut Vec<&'a Node>) {
+/// Visit each direct child of a node via callback — zero allocation.
+#[inline]
+pub fn for_each_child<'a>(node: &'a Node, mut f: impl FnMut(&'a Node)) {
+    visit_children(node, &mut f);
+}
+
+fn visit_opt<'a>(opt: &'a Option<Box<Node>>, f: &mut impl FnMut(&'a Node)) {
     if let Some(n) = opt.as_deref() {
-        out.push(n);
+        f(n);
     }
 }
 
-fn push_vec<'a>(v: &'a [Node], out: &mut Vec<&'a Node>) {
+fn visit_vec<'a>(v: &'a [Node], f: &mut impl FnMut(&'a Node)) {
     for n in v {
-        out.push(n);
+        f(n);
     }
 }
 
-fn push_children<'a>(node: &'a Node, out: &mut Vec<&'a Node>) {
+fn visit_children<'a>(node: &'a Node, f: &mut impl FnMut(&'a Node)) {
     match node {
         Node::Alias(n) => {
-            out.push(&n.to);
-            out.push(&n.from);
+            f(&n.to);
+            f(&n.from);
         }
         Node::And(n) => {
-            out.push(&n.lhs);
-            out.push(&n.rhs);
+            f(&n.lhs);
+            f(&n.rhs);
         }
         Node::AndAsgn(n) => {
-            out.push(&n.recv);
-            out.push(&n.value);
+            f(&n.recv);
+            f(&n.value);
         }
         Node::Arg(_)
         | Node::BackRef(_)
@@ -255,232 +253,232 @@ fn push_children<'a>(node: &'a Node, out: &mut Vec<&'a Node>) {
         | Node::ZSuper(_)
         | Node::NthRef(_)
         | Node::RegOpt(_) => {}
-        Node::Args(n) => push_vec(&n.args, out),
-        Node::Array(n) => push_vec(&n.elements, out),
-        Node::ArrayPattern(n) => push_vec(&n.elements, out),
-        Node::ArrayPatternWithTail(n) => push_vec(&n.elements, out),
-        Node::Begin(n) => push_vec(&n.statements, out),
+        Node::Args(n) => visit_vec(&n.args, f),
+        Node::Array(n) => visit_vec(&n.elements, f),
+        Node::ArrayPattern(n) => visit_vec(&n.elements, f),
+        Node::ArrayPatternWithTail(n) => visit_vec(&n.elements, f),
+        Node::Begin(n) => visit_vec(&n.statements, f),
         Node::Block(n) => {
-            out.push(&n.call);
-            push_opt(&n.args, out);
-            push_opt(&n.body, out);
+            f(&n.call);
+            visit_opt(&n.args, f);
+            visit_opt(&n.body, f);
         }
-        Node::BlockPass(n) => push_opt(&n.value, out),
-        Node::Break(n) => push_vec(&n.args, out),
+        Node::BlockPass(n) => visit_opt(&n.value, f),
+        Node::Break(n) => visit_vec(&n.args, f),
         Node::Case(n) => {
-            push_opt(&n.expr, out);
-            push_vec(&n.when_bodies, out);
-            push_opt(&n.else_body, out);
+            visit_opt(&n.expr, f);
+            visit_vec(&n.when_bodies, f);
+            visit_opt(&n.else_body, f);
         }
         Node::CaseMatch(n) => {
-            out.push(&n.expr);
-            push_vec(&n.in_bodies, out);
-            push_opt(&n.else_body, out);
+            f(&n.expr);
+            visit_vec(&n.in_bodies, f);
+            visit_opt(&n.else_body, f);
         }
         Node::Casgn(n) => {
-            push_opt(&n.scope, out);
-            push_opt(&n.value, out);
+            visit_opt(&n.scope, f);
+            visit_opt(&n.value, f);
         }
         Node::Class(n) => {
-            out.push(&n.name);
-            push_opt(&n.superclass, out);
-            push_opt(&n.body, out);
+            f(&n.name);
+            visit_opt(&n.superclass, f);
+            visit_opt(&n.body, f);
         }
-        Node::Const(n) => push_opt(&n.scope, out),
+        Node::Const(n) => visit_opt(&n.scope, f),
         Node::ConstPattern(n) => {
-            out.push(&n.const_);
-            out.push(&n.pattern);
+            f(&n.const_);
+            f(&n.pattern);
         }
         Node::CSend(n) => {
-            out.push(&n.recv);
-            push_vec(&n.args, out);
+            f(&n.recv);
+            visit_vec(&n.args, f);
         }
-        Node::Cvasgn(n) => push_opt(&n.value, out),
+        Node::Cvasgn(n) => visit_opt(&n.value, f),
         Node::Def(n) => {
-            push_opt(&n.args, out);
-            push_opt(&n.body, out);
+            visit_opt(&n.args, f);
+            visit_opt(&n.body, f);
         }
-        Node::Defined(n) => out.push(&n.value),
+        Node::Defined(n) => f(&n.value),
         Node::Defs(n) => {
-            out.push(&n.definee);
-            push_opt(&n.args, out);
-            push_opt(&n.body, out);
+            f(&n.definee);
+            visit_opt(&n.args, f);
+            visit_opt(&n.body, f);
         }
-        Node::Dstr(n) => push_vec(&n.parts, out),
-        Node::Dsym(n) => push_vec(&n.parts, out),
+        Node::Dstr(n) => visit_vec(&n.parts, f),
+        Node::Dsym(n) => visit_vec(&n.parts, f),
         Node::EFlipFlop(n) => {
-            push_opt(&n.left, out);
-            push_opt(&n.right, out);
+            visit_opt(&n.left, f);
+            visit_opt(&n.right, f);
         }
         Node::Ensure(n) => {
-            push_opt(&n.body, out);
-            push_opt(&n.ensure, out);
+            visit_opt(&n.body, f);
+            visit_opt(&n.ensure, f);
         }
         Node::Erange(n) => {
-            push_opt(&n.left, out);
-            push_opt(&n.right, out);
+            visit_opt(&n.left, f);
+            visit_opt(&n.right, f);
         }
-        Node::FindPattern(n) => push_vec(&n.elements, out),
+        Node::FindPattern(n) => visit_vec(&n.elements, f),
         Node::For(n) => {
-            out.push(&n.iterator);
-            out.push(&n.iteratee);
-            push_opt(&n.body, out);
+            f(&n.iterator);
+            f(&n.iteratee);
+            visit_opt(&n.body, f);
         }
-        Node::Gvasgn(n) => push_opt(&n.value, out),
-        Node::Hash(n) => push_vec(&n.pairs, out),
-        Node::HashPattern(n) => push_vec(&n.elements, out),
-        Node::Heredoc(n) => push_vec(&n.parts, out),
+        Node::Gvasgn(n) => visit_opt(&n.value, f),
+        Node::Hash(n) => visit_vec(&n.pairs, f),
+        Node::HashPattern(n) => visit_vec(&n.elements, f),
+        Node::Heredoc(n) => visit_vec(&n.parts, f),
         Node::If(n) => {
-            out.push(&n.cond);
-            push_opt(&n.if_true, out);
-            push_opt(&n.if_false, out);
+            f(&n.cond);
+            visit_opt(&n.if_true, f);
+            visit_opt(&n.if_false, f);
         }
-        Node::IfGuard(n) => out.push(&n.cond),
+        Node::IfGuard(n) => f(&n.cond),
         Node::IFlipFlop(n) => {
-            push_opt(&n.left, out);
-            push_opt(&n.right, out);
+            visit_opt(&n.left, f);
+            visit_opt(&n.right, f);
         }
         Node::IfMod(n) => {
-            out.push(&n.cond);
-            push_opt(&n.if_true, out);
-            push_opt(&n.if_false, out);
+            f(&n.cond);
+            visit_opt(&n.if_true, f);
+            visit_opt(&n.if_false, f);
         }
         Node::IfTernary(n) => {
-            out.push(&n.cond);
-            out.push(&n.if_true);
-            out.push(&n.if_false);
+            f(&n.cond);
+            f(&n.if_true);
+            f(&n.if_false);
         }
         Node::Index(n) => {
-            out.push(&n.recv);
-            push_vec(&n.indexes, out);
+            f(&n.recv);
+            visit_vec(&n.indexes, f);
         }
         Node::IndexAsgn(n) => {
-            out.push(&n.recv);
-            push_vec(&n.indexes, out);
-            push_opt(&n.value, out);
+            f(&n.recv);
+            visit_vec(&n.indexes, f);
+            visit_opt(&n.value, f);
         }
         Node::InPattern(n) => {
-            out.push(&n.pattern);
-            push_opt(&n.guard, out);
-            push_opt(&n.body, out);
+            f(&n.pattern);
+            visit_opt(&n.guard, f);
+            visit_opt(&n.body, f);
         }
         Node::Irange(n) => {
-            push_opt(&n.left, out);
-            push_opt(&n.right, out);
+            visit_opt(&n.left, f);
+            visit_opt(&n.right, f);
         }
-        Node::Ivasgn(n) => push_opt(&n.value, out),
-        Node::Kwargs(n) => push_vec(&n.pairs, out),
-        Node::KwBegin(n) => push_vec(&n.statements, out),
-        Node::Kwoptarg(n) => out.push(&n.default),
+        Node::Ivasgn(n) => visit_opt(&n.value, f),
+        Node::Kwargs(n) => visit_vec(&n.pairs, f),
+        Node::KwBegin(n) => visit_vec(&n.statements, f),
+        Node::Kwoptarg(n) => f(&n.default),
         Node::Kwrestarg(_) => {}
-        Node::Kwsplat(n) => out.push(&n.value),
-        Node::Lvasgn(n) => push_opt(&n.value, out),
+        Node::Kwsplat(n) => f(&n.value),
+        Node::Lvasgn(n) => visit_opt(&n.value, f),
         Node::Masgn(n) => {
-            out.push(&n.lhs);
-            out.push(&n.rhs);
+            f(&n.lhs);
+            f(&n.rhs);
         }
         Node::MatchAlt(n) => {
-            out.push(&n.lhs);
-            out.push(&n.rhs);
+            f(&n.lhs);
+            f(&n.rhs);
         }
         Node::MatchAs(n) => {
-            out.push(&n.value);
-            out.push(&n.as_);
+            f(&n.value);
+            f(&n.as_);
         }
-        Node::MatchCurrentLine(n) => out.push(&n.re),
+        Node::MatchCurrentLine(n) => f(&n.re),
         Node::MatchNilPattern(_) => {}
         Node::MatchPattern(n) => {
-            out.push(&n.value);
-            out.push(&n.pattern);
+            f(&n.value);
+            f(&n.pattern);
         }
         Node::MatchPatternP(n) => {
-            out.push(&n.value);
-            out.push(&n.pattern);
+            f(&n.value);
+            f(&n.pattern);
         }
-        Node::MatchRest(n) => push_opt(&n.name, out),
+        Node::MatchRest(n) => visit_opt(&n.name, f),
         Node::MatchVar(_) => {}
         Node::MatchWithLvasgn(n) => {
-            out.push(&n.re);
-            out.push(&n.value);
+            f(&n.re);
+            f(&n.value);
         }
-        Node::Mlhs(n) => push_vec(&n.items, out),
+        Node::Mlhs(n) => visit_vec(&n.items, f),
         Node::Module(n) => {
-            out.push(&n.name);
-            push_opt(&n.body, out);
+            f(&n.name);
+            visit_opt(&n.body, f);
         }
-        Node::Next(n) => push_vec(&n.args, out),
+        Node::Next(n) => visit_vec(&n.args, f),
         Node::Numblock(n) => {
-            out.push(&n.call);
-            out.push(&n.body);
+            f(&n.call);
+            f(&n.body);
         }
         Node::OpAsgn(n) => {
-            out.push(&n.recv);
-            out.push(&n.value);
+            f(&n.recv);
+            f(&n.value);
         }
-        Node::Optarg(n) => out.push(&n.default),
+        Node::Optarg(n) => f(&n.default),
         Node::Or(n) => {
-            out.push(&n.lhs);
-            out.push(&n.rhs);
+            f(&n.lhs);
+            f(&n.rhs);
         }
         Node::OrAsgn(n) => {
-            out.push(&n.recv);
-            out.push(&n.value);
+            f(&n.recv);
+            f(&n.value);
         }
         Node::Pair(n) => {
-            out.push(&n.key);
-            out.push(&n.value);
+            f(&n.key);
+            f(&n.value);
         }
-        Node::Pin(n) => out.push(&n.var),
-        Node::Postexe(n) => push_opt(&n.body, out),
-        Node::Preexe(n) => push_opt(&n.body, out),
-        Node::Procarg0(n) => push_vec(&n.args, out),
-        Node::Regexp(n) => push_vec(&n.parts, out),
+        Node::Pin(n) => f(&n.var),
+        Node::Postexe(n) => visit_opt(&n.body, f),
+        Node::Preexe(n) => visit_opt(&n.body, f),
+        Node::Procarg0(n) => visit_vec(&n.args, f),
+        Node::Regexp(n) => visit_vec(&n.parts, f),
         Node::Rescue(n) => {
-            push_opt(&n.body, out);
-            push_vec(&n.rescue_bodies, out);
-            push_opt(&n.else_, out);
+            visit_opt(&n.body, f);
+            visit_vec(&n.rescue_bodies, f);
+            visit_opt(&n.else_, f);
         }
         Node::RescueBody(n) => {
-            push_opt(&n.exc_list, out);
-            push_opt(&n.exc_var, out);
-            push_opt(&n.body, out);
+            visit_opt(&n.exc_list, f);
+            visit_opt(&n.exc_var, f);
+            visit_opt(&n.body, f);
         }
-        Node::Return(n) => push_vec(&n.args, out),
+        Node::Return(n) => visit_vec(&n.args, f),
         Node::SClass(n) => {
-            out.push(&n.expr);
-            push_opt(&n.body, out);
+            f(&n.expr);
+            visit_opt(&n.body, f);
         }
         Node::Send(n) => {
-            push_opt(&n.recv, out);
-            push_vec(&n.args, out);
+            visit_opt(&n.recv, f);
+            visit_vec(&n.args, f);
         }
-        Node::Splat(n) => push_opt(&n.value, out),
+        Node::Splat(n) => visit_opt(&n.value, f),
         Node::Str(_) => {}
-        Node::Super(n) => push_vec(&n.args, out),
-        Node::Undef(n) => push_vec(&n.names, out),
-        Node::UnlessGuard(n) => out.push(&n.cond),
+        Node::Super(n) => visit_vec(&n.args, f),
+        Node::Undef(n) => visit_vec(&n.names, f),
+        Node::UnlessGuard(n) => f(&n.cond),
         Node::Until(n) => {
-            out.push(&n.cond);
-            push_opt(&n.body, out);
+            f(&n.cond);
+            visit_opt(&n.body, f);
         }
         Node::UntilPost(n) => {
-            out.push(&n.cond);
-            out.push(&n.body);
+            f(&n.cond);
+            f(&n.body);
         }
         Node::When(n) => {
-            push_vec(&n.patterns, out);
-            push_opt(&n.body, out);
+            visit_vec(&n.patterns, f);
+            visit_opt(&n.body, f);
         }
         Node::While(n) => {
-            out.push(&n.cond);
-            push_opt(&n.body, out);
+            f(&n.cond);
+            visit_opt(&n.body, f);
         }
         Node::WhilePost(n) => {
-            out.push(&n.cond);
-            out.push(&n.body);
+            f(&n.cond);
+            f(&n.body);
         }
-        Node::XHeredoc(n) => push_vec(&n.parts, out),
-        Node::Xstr(n) => push_vec(&n.parts, out),
-        Node::Yield(n) => push_vec(&n.args, out),
+        Node::XHeredoc(n) => visit_vec(&n.parts, f),
+        Node::Xstr(n) => visit_vec(&n.parts, f),
+        Node::Yield(n) => visit_vec(&n.args, f),
     }
 }
