@@ -79,3 +79,92 @@ fn statistics_line_present() {
         stdout
     );
 }
+
+#[test]
+fn format_rule_output() {
+    let output = cargo_bin()
+        .args(["tests/fixtures/19_for_loop.rb", "--format", "rule"])
+        .output()
+        .expect("Failed to run");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("offense"),
+        "Expected offense count in rule output: {}",
+        stdout
+    );
+}
+
+#[test]
+fn format_plain_output() {
+    let output = cargo_bin()
+        .args(["tests/fixtures/19_for_loop.rb", "--format", "plain"])
+        .output()
+        .expect("Failed to run");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("19_for_loop.rb:"),
+        "Expected path:line format in plain output: {}",
+        stdout
+    );
+}
+
+#[test]
+fn fix_mode_modifies_file() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let file = dir.path().join("fixable.rb");
+    std::fs::write(&file, "for x in [1,2,3]; puts x; end\n").unwrap();
+    let output = cargo_bin()
+        .args([file.to_str().unwrap(), "--fix"])
+        .output()
+        .expect("Failed to run");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("fixed"),
+        "Expected 'fixed' in fix output: {}",
+        stdout
+    );
+    let content = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        content.contains(".each do"),
+        "Expected file to be fixed: {}",
+        content
+    );
+}
+
+#[test]
+fn fix_mode_reports_unfixable() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let file = dir.path().join("unfixable.rb");
+    // sort with block is unfixable
+    std::fs::write(&file, "arr.sort { |a, b| a <=> b }\n").unwrap();
+    let output = cargo_bin()
+        .args([file.to_str().unwrap(), "--fix"])
+        .output()
+        .expect("Failed to run");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("cannot be auto-fixed") || stdout.contains("0 offenses fixed"),
+        "Expected unfixable note in output: {}",
+        stdout
+    );
+}
+
+#[test]
+fn config_disables_rule() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("test.rb"), "for x in [1]; end\n").unwrap();
+    std::fs::write(
+        dir.path().join(".rubyfast.yml"),
+        "speedups:\n  for_loop_vs_each: false\n",
+    )
+    .unwrap();
+    let output = cargo_bin()
+        .arg(dir.path().to_str().unwrap())
+        .output()
+        .expect("Failed to run");
+    assert!(
+        output.status.success(),
+        "Expected exit 0 when rule is disabled. stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}

@@ -75,4 +75,26 @@ mod tests {
         let offenses = parse_and_find_rescue_bodies(b"begin; rescue; end");
         assert_eq!(offenses.len(), 0);
     }
+
+    #[test]
+    fn multiple_exceptions_including_no_method_error() {
+        let offenses = parse_and_find_rescue_bodies(
+            b"begin; rescue ArgumentError, NoMethodError; end",
+        );
+        assert_eq!(offenses.len(), 1);
+    }
+
+    #[test]
+    fn scoped_no_method_error_no_fire() {
+        let offenses = parse_and_find_rescue_bodies(
+            b"begin; rescue SomeModule::NoMethodError; end",
+        );
+        assert_eq!(offenses.len(), 0);
+    }
+
+    #[test]
+    fn rescue_other_error_no_fire() {
+        let offenses = parse_and_find_rescue_bodies(b"begin; rescue TypeError; end");
+        assert_eq!(offenses.len(), 0);
+    }
 }

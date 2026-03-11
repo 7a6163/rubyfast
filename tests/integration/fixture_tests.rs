@@ -147,3 +147,9 @@ fn clean_file_has_no_offenses() {
     let kinds = analyze("clean.rb");
     assert!(kinds.is_empty(), "Expected no offenses, got: {:?}", kinds);
 }
+
+#[test]
+fn module_eval_heredoc() {
+    let kinds = analyze("14b_module_eval_heredoc.rb");
+    assert_eq!(count_kind(&kinds, OffenseKind::ModuleEval), 1);
+}

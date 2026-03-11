@@ -165,4 +165,57 @@ mod tests {
         let result = apply_fixes(source, &[fix]);
         assert_eq!(result, b"arr.flat_map { |x| [x] }");
     }
+
+    #[test]
+    fn apply_fixes_empty_fixes() {
+        let source = b"hello world";
+        let result = apply_fixes(source, &[]);
+        assert_eq!(result, source);
+    }
+
+    #[test]
+    fn apply_fixes_out_of_bounds_skipped() {
+        let source = b"short";
+        let fix = Fix::single(10, 20, "big");
+        let result = apply_fixes(source, &[fix]);
+        assert_eq!(result, b"short");
+    }
+
+    #[test]
+    fn apply_fixes_to_file_no_fixes() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("test.rb");
+        std::fs::write(&file, "x = 1").unwrap();
+        let result = apply_fixes_to_file(&file, &[]).unwrap();
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn apply_fixes_to_file_valid_fix() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("test.rb");
+        std::fs::write(&file, "for x in [1]; end").unwrap();
+        // Replace "for x in [1]; " with "[1].each do |x|; "
+        let fix = Fix::single(0, 14, "[1].each do |x|;");
+        let result = apply_fixes_to_file(&file, &[fix]).unwrap();
+        assert_eq!(result, 1);
+    }
+
+    #[test]
+    fn apply_fixes_to_file_syntax_error_skipped() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("test.rb");
+        std::fs::write(&file, "x = 1 + 2").unwrap();
+        // This fix produces invalid syntax
+        let fix = Fix::single(0, 9, "def def def");
+        let result = apply_fixes_to_file(&file, &[fix]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn apply_fixes_to_file_nonexistent_file() {
+        let fix = Fix::single(0, 3, "x");
+        let result = apply_fixes_to_file(Path::new("/nonexistent.rb"), &[fix]);
+        assert!(result.is_err());
+    }
 }

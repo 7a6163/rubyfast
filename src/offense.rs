@@ -158,3 +158,59 @@ impl Offense {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_returns_19_variants() {
+        assert_eq!(OffenseKind::all().len(), 19);
+    }
+
+    #[test]
+    fn config_key_roundtrips_via_from_config_key() {
+        for kind in OffenseKind::all() {
+            let key = kind.config_key();
+            let restored = OffenseKind::from_config_key(key);
+            assert_eq!(restored, Some(*kind), "roundtrip failed for {}", key);
+        }
+    }
+
+    #[test]
+    fn from_config_key_returns_none_for_unknown() {
+        assert_eq!(OffenseKind::from_config_key("nonexistent"), None);
+    }
+
+    #[test]
+    fn explanation_is_non_empty_for_all() {
+        for kind in OffenseKind::all() {
+            let explanation = kind.explanation();
+            assert!(!explanation.is_empty(), "empty explanation for {:?}", kind);
+        }
+    }
+
+    #[test]
+    fn display_matches_config_key() {
+        for kind in OffenseKind::all() {
+            assert_eq!(format!("{}", kind), kind.config_key());
+        }
+    }
+
+    #[test]
+    fn offense_new_has_no_fix() {
+        let offense = Offense::new(OffenseKind::GsubVsTr, 42);
+        assert_eq!(offense.kind, OffenseKind::GsubVsTr);
+        assert_eq!(offense.line, 42);
+        assert!(offense.fix.is_none());
+    }
+
+    #[test]
+    fn offense_with_fix_has_fix() {
+        let fix = Fix::single(0, 5, "hello");
+        let offense = Offense::with_fix(OffenseKind::ForLoopVsEach, 10, fix);
+        assert_eq!(offense.kind, OffenseKind::ForLoopVsEach);
+        assert_eq!(offense.line, 10);
+        assert!(offense.fix.is_some());
+    }
+}

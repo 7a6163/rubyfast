@@ -223,7 +223,7 @@ fn print_fix_statistics(result: &TraversalResult, total_fixed: usize, total_erro
         fixed_str.to_string()
     };
 
-    let unfixable = offenses - fixable;
+    let unfixable = offenses.saturating_sub(fixable);
     if total_errors > 0 {
         let err_str = format!(
             "{} {} skipped (syntax error after fix)",
@@ -265,5 +265,181 @@ fn pluralize(word: &str, count: usize) -> String {
         word.to_string()
     } else {
         format!("{}s", word)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analyzer::AnalysisResult;
+    use crate::fix::Fix;
+    use crate::offense::{Offense, OffenseKind};
+
+    #[test]
+    fn pluralize_singular() {
+        assert_eq!(pluralize("file", 1), "file");
+    }
+
+    #[test]
+    fn pluralize_plural() {
+        assert_eq!(pluralize("file", 0), "files");
+        assert_eq!(pluralize("offense", 2), "offenses");
+    }
+
+    fn make_result(offenses: Vec<Offense>) -> TraversalResult {
+        TraversalResult {
+            results: vec![AnalysisResult {
+                path: "test.rb".to_string(),
+                offenses,
+            }],
+            parse_errors: vec![],
+            files_inspected: 1,
+        }
+    }
+
+    #[test]
+    fn filter_unfixable_keeps_only_no_fix() {
+        let offenses = vec![
+            Offense::new(OffenseKind::GsubVsTr, 1),
+            Offense::with_fix(OffenseKind::ForLoopVsEach, 2, Fix::single(0, 3, "x")),
+            Offense::new(OffenseKind::SortVsSortBy, 3),
+        ];
+        let result = make_result(offenses);
+        let filtered = filter_unfixable(&result);
+        assert_eq!(filtered.results[0].offenses.len(), 2);
+        assert!(filtered.results[0]
+            .offenses
+            .iter()
+            .all(|o| o.fix.is_none()));
+    }
+
+    #[test]
+    fn filter_unfixable_empty_when_all_fixable() {
+        let offenses = vec![Offense::with_fix(
+            OffenseKind::ForLoopVsEach,
+            1,
+            Fix::single(0, 3, "x"),
+        )];
+        let result = make_result(offenses);
+        let filtered = filter_unfixable(&result);
+        assert_eq!(filtered.results[0].offenses.len(), 0);
+    }
+
+    #[test]
+    fn print_results_by_file_no_panic() {
+        let result = make_result(vec![Offense::new(OffenseKind::GsubVsTr, 5)]);
+        print_results_by_file(&result);
+    }
+
+    #[test]
+    fn print_results_by_file_empty_no_panic() {
+        let result = make_result(vec![]);
+        print_results_by_file(&result);
+    }
+
+    #[test]
+    fn print_results_by_rule_no_panic() {
+        let result = make_result(vec![
+            Offense::new(OffenseKind::GsubVsTr, 5),
+            Offense::new(OffenseKind::GsubVsTr, 10),
+        ]);
+        print_results_by_rule(&result);
+    }
+
+    #[test]
+    fn print_results_plain_no_panic() {
+        let result = make_result(vec![Offense::new(OffenseKind::GsubVsTr, 5)]);
+        print_results_plain(&result);
+    }
+
+    #[test]
+    fn print_results_plain_empty_no_panic() {
+        let result = make_result(vec![]);
+        print_results_plain(&result);
+    }
+
+    #[test]
+    fn print_statistics_no_offenses() {
+        let result = make_result(vec![]);
+        print_statistics(&result);
+    }
+
+    #[test]
+    fn print_statistics_with_offenses() {
+        let result = make_result(vec![Offense::new(OffenseKind::GsubVsTr, 5)]);
+        print_statistics(&result);
+    }
+
+    #[test]
+    fn print_statistics_with_parse_errors() {
+        let result = TraversalResult {
+            results: vec![],
+            parse_errors: vec![ParseError {
+                path: "bad.rb".to_string(),
+                message: "syntax error".to_string(),
+            }],
+            files_inspected: 1,
+        };
+        print_statistics(&result);
+    }
+
+    #[test]
+    fn print_parse_errors_no_panic() {
+        let errors = vec![ParseError {
+            path: "bad.rb".to_string(),
+            message: "oops".to_string(),
+        }];
+        print_parse_errors(&errors);
+    }
+
+    #[test]
+    fn print_results_dispatches_all_formats() {
+        let result = make_result(vec![Offense::new(OffenseKind::GsubVsTr, 1)]);
+        print_results(&result, &OutputFormat::File);
+        print_results(&result, &OutputFormat::Rule);
+        print_results(&result, &OutputFormat::Plain);
+    }
+
+    #[test]
+    fn print_fix_results_no_panic() {
+        let offenses = vec![
+            Offense::new(OffenseKind::GsubVsTr, 1),
+            Offense::with_fix(OffenseKind::ForLoopVsEach, 2, Fix::single(0, 3, "x")),
+        ];
+        let result = make_result(offenses);
+        print_fix_results(&result, 1, 0, &OutputFormat::File);
+    }
+
+    #[test]
+    fn print_fix_results_with_errors() {
+        let offenses = vec![Offense::with_fix(
+            OffenseKind::ForLoopVsEach,
+            1,
+            Fix::single(0, 3, "x"),
+        )];
+        let result = make_result(offenses);
+        print_fix_results(&result, 0, 1, &OutputFormat::File);
+    }
+
+    #[test]
+    fn print_fix_results_all_fixed() {
+        let offenses = vec![Offense::with_fix(
+            OffenseKind::ForLoopVsEach,
+            1,
+            Fix::single(0, 3, "x"),
+        )];
+        let result = make_result(offenses);
+        print_fix_results(&result, 1, 0, &OutputFormat::File);
+    }
+
+    #[test]
+    fn print_fix_results_unfixable_remaining() {
+        let offenses = vec![
+            Offense::new(OffenseKind::GsubVsTr, 1),
+            Offense::with_fix(OffenseKind::ForLoopVsEach, 2, Fix::single(0, 3, "x")),
+        ];
+        let result = make_result(offenses);
+        print_fix_results(&result, 1, 0, &OutputFormat::Rule);
+        print_fix_results(&result, 1, 0, &OutputFormat::Plain);
     }
 }

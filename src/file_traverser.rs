@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
@@ -79,7 +80,7 @@ fn collect_ruby_files(path: &Path) -> Vec<PathBuf> {
 }
 
 /// Expand exclude patterns relative to a base path, pre-canonicalizing results.
-fn collect_excluded_files(patterns: &[String], base: &Path) -> Vec<PathBuf> {
+fn collect_excluded_files(patterns: &[String], base: &Path) -> HashSet<PathBuf> {
     patterns
         .iter()
         .flat_map(|pattern| {
@@ -103,7 +104,176 @@ fn collect_excluded_files(patterns: &[String], base: &Path) -> Vec<PathBuf> {
 }
 
 /// Check if a file should be excluded.
-fn is_excluded(file: &Path, excluded: &[PathBuf]) -> bool {
+fn is_excluded(file: &Path, excluded: &HashSet<PathBuf>) -> bool {
     let file_canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     excluded.contains(&file_canonical)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn traversal_result_total_offenses() {
+        let result = TraversalResult {
+            results: vec![
+                crate::analyzer::AnalysisResult {
+                    path: "a.rb".to_string(),
+                    offenses: vec![
+                        crate::offense::Offense::new(crate::offense::OffenseKind::GsubVsTr, 1),
+                        crate::offense::Offense::new(crate::offense::OffenseKind::GsubVsTr, 2),
+                    ],
+                },
+                crate::analyzer::AnalysisResult {
+                    path: "b.rb".to_string(),
+                    offenses: vec![crate::offense::Offense::new(
+                        crate::offense::OffenseKind::GsubVsTr,
+                        1,
+                    )],
+                },
+            ],
+            parse_errors: vec![],
+            files_inspected: 2,
+        };
+        assert_eq!(result.total_offenses(), 3);
+        assert!(result.has_offenses());
+    }
+
+    #[test]
+    fn traversal_result_no_offenses() {
+        let result = TraversalResult {
+            results: vec![],
+            parse_errors: vec![],
+            files_inspected: 0,
+        };
+        assert_eq!(result.total_offenses(), 0);
+        assert!(!result.has_offenses());
+    }
+
+    #[test]
+    fn collect_ruby_files_single_file() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("test.rb");
+        fs::write(&file, "x = 1").unwrap();
+        let files = collect_ruby_files(&file);
+        assert_eq!(files.len(), 1);
+    }
+
+    #[test]
+    fn collect_ruby_files_directory() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("a.rb"), "x = 1").unwrap();
+        fs::write(dir.path().join("b.rb"), "y = 2").unwrap();
+        fs::write(dir.path().join("c.txt"), "not ruby").unwrap();
+        let files = collect_ruby_files(dir.path());
+        assert_eq!(files.len(), 2);
+    }
+
+    #[test]
+    fn collect_ruby_files_nested() {
+        let dir = TempDir::new().unwrap();
+        let sub = dir.path().join("sub");
+        fs::create_dir(&sub).unwrap();
+        fs::write(sub.join("deep.rb"), "z = 3").unwrap();
+        let files = collect_ruby_files(dir.path());
+        assert_eq!(files.len(), 1);
+    }
+
+    #[test]
+    fn collect_ruby_files_no_rb() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("readme.md"), "hello").unwrap();
+        let files = collect_ruby_files(dir.path());
+        assert!(files.is_empty());
+    }
+
+    #[test]
+    fn is_excluded_matching() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("test.rb");
+        fs::write(&file, "x = 1").unwrap();
+        let canonical = file.canonicalize().unwrap();
+        let excluded: HashSet<PathBuf> = [canonical].into_iter().collect();
+        assert!(is_excluded(&file, &excluded));
+    }
+
+    #[test]
+    fn is_excluded_not_matching() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("test.rb");
+        fs::write(&file, "x = 1").unwrap();
+        let excluded: HashSet<PathBuf> = HashSet::new();
+        assert!(!is_excluded(&file, &excluded));
+    }
+
+    #[test]
+    fn collect_excluded_files_with_pattern() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("vendor.rb"), "x").unwrap();
+        let patterns = vec![format!("{}/*.rb", dir.path().display())];
+        let excluded = collect_excluded_files(&patterns, dir.path());
+        assert!(!excluded.is_empty());
+    }
+
+    #[test]
+    fn collect_excluded_files_relative_pattern() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("skip.rb"), "x").unwrap();
+        let patterns = vec!["*.rb".to_string()];
+        let excluded = collect_excluded_files(&patterns, dir.path());
+        assert!(!excluded.is_empty());
+    }
+
+    #[test]
+    fn collect_excluded_files_invalid_pattern() {
+        let excluded = collect_excluded_files(&["[invalid".to_string()], Path::new("."));
+        assert!(excluded.is_empty());
+    }
+
+    #[test]
+    fn traverse_and_analyze_with_tempdir() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("test.rb"), "for x in [1]; end").unwrap();
+        let config = Config::default();
+        let result = traverse_and_analyze(dir.path(), &config);
+        assert_eq!(result.files_inspected, 1);
+        assert!(result.has_offenses());
+    }
+
+    #[test]
+    fn traverse_and_analyze_clean_file() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("clean.rb"), "x = 1 + 2").unwrap();
+        let config = Config::default();
+        let result = traverse_and_analyze(dir.path(), &config);
+        assert_eq!(result.files_inspected, 1);
+        assert!(!result.has_offenses());
+    }
+
+    #[test]
+    fn traverse_and_analyze_with_exclusion() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("test.rb"), "for x in [1]; end").unwrap();
+        let config = Config::parse_yaml(&format!(
+            "exclude_paths:\n  - '{}/*.rb'\n",
+            dir.path().display()
+        ))
+        .unwrap();
+        let result = traverse_and_analyze(dir.path(), &config);
+        assert_eq!(result.files_inspected, 0);
+    }
+
+    #[test]
+    fn traverse_and_analyze_parse_error() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("bad.rb"), "def def def").unwrap();
+        let config = Config::default();
+        let result = traverse_and_analyze(dir.path(), &config);
+        assert_eq!(result.files_inspected, 1);
+        // "def def def" produces a fatal parse error with no recoverable AST
+        assert_eq!(result.parse_errors.len(), 1);
+        assert!(result.results.is_empty());
+    }
 }

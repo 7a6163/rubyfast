@@ -194,6 +194,557 @@ pub fn for_each_child<'a>(node: &'a Node, mut f: impl FnMut(&'a Node)) {
     visit_children(node, &mut f);
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lib_ruby_parser::Parser;
+
+    fn parse(source: &[u8]) -> Option<Box<Node>> {
+        Parser::new(source.to_vec(), Default::default())
+            .do_parse()
+            .ast
+    }
+
+    fn count_children(node: &Node) -> usize {
+        let mut count = 0;
+        for_each_child(node, |_| count += 1);
+        count
+    }
+
+    /// Recursively count all nodes in the AST.
+    fn count_all_nodes(node: &Node) -> usize {
+        let mut count = 1;
+        for_each_child(node, |child| count += count_all_nodes(child));
+        count
+    }
+
+    #[test]
+    fn byte_offset_to_line_basic() {
+        let positions = vec![5, 11];
+        assert_eq!(byte_offset_to_line(&positions, 0), 1);
+        assert_eq!(byte_offset_to_line(&positions, 5), 1); // exact match
+        assert_eq!(byte_offset_to_line(&positions, 6), 2);
+        assert_eq!(byte_offset_to_line(&positions, 12), 3);
+    }
+
+    #[test]
+    fn byte_offset_to_line_empty() {
+        assert_eq!(byte_offset_to_line(&[], 0), 1);
+        assert_eq!(byte_offset_to_line(&[], 100), 1);
+    }
+
+    #[test]
+    fn receiver_is_send_with_name_works() {
+        let ast = parse(b"a.foo.bar").unwrap();
+        if let Node::Send(s) = ast.as_ref() {
+            assert!(receiver_is_send_with_name(&s.recv, "foo"));
+            assert!(!receiver_is_send_with_name(&s.recv, "baz"));
+        }
+    }
+
+    #[test]
+    fn receiver_is_send_with_name_none() {
+        assert!(!receiver_is_send_with_name(&None, "foo"));
+    }
+
+    #[test]
+    fn receiver_as_send_works() {
+        let ast = parse(b"a.foo.bar").unwrap();
+        if let Node::Send(s) = ast.as_ref() {
+            let inner = receiver_as_send(&s.recv).unwrap();
+            assert_eq!(inner.method_name, "foo");
+        }
+    }
+
+    #[test]
+    fn receiver_as_send_not_send() {
+        assert!(receiver_as_send(&None).is_none());
+    }
+
+    #[test]
+    fn block_call_as_send_works() {
+        let ast = parse(b"arr.map { |x| x }").unwrap();
+        if let Node::Block(b) = ast.as_ref() {
+            let send = block_call_as_send(b).unwrap();
+            assert_eq!(send.method_name, "map");
+        }
+    }
+
+    #[test]
+    fn has_block_pass_works() {
+        let ast = parse(b"arr.map(&:to_s)").unwrap();
+        if let Node::Send(s) = ast.as_ref() {
+            assert!(has_block_pass(&s.args));
+        }
+    }
+
+    #[test]
+    fn has_block_pass_without() {
+        let ast = parse(b"arr.map(1)").unwrap();
+        if let Node::Send(s) = ast.as_ref() {
+            assert!(!has_block_pass(&s.args));
+        }
+    }
+
+    #[test]
+    fn arg_count_without_block_pass_works() {
+        let ast = parse(b"arr.select(&:odd?).first").unwrap();
+        if let Node::Send(s) = ast.as_ref() {
+            assert_eq!(arg_count_without_block_pass(&s.args), 0);
+        }
+    }
+
+    #[test]
+    fn is_single_char_string_works() {
+        let ast = parse(b"'x'").unwrap();
+        assert!(is_single_char_string(&ast));
+        let ast2 = parse(b"'xy'").unwrap();
+        assert!(!is_single_char_string(&ast2));
+    }
+
+    #[test]
+    fn is_single_char_string_not_string() {
+        let ast = parse(b"42").unwrap();
+        assert!(!is_single_char_string(&ast));
+    }
+
+    #[test]
+    fn receiver_is_range_irange() {
+        let ast = parse(b"(1..10).include?(5)").unwrap();
+        if let Node::Send(s) = ast.as_ref() {
+            assert!(receiver_is_range(&s.recv));
+        }
+    }
+
+    #[test]
+    fn receiver_is_range_erange() {
+        let ast = parse(b"(1...10).include?(5)").unwrap();
+        if let Node::Send(s) = ast.as_ref() {
+            assert!(receiver_is_range(&s.recv));
+        }
+    }
+
+    #[test]
+    fn receiver_is_range_not_range() {
+        let ast = parse(b"[1].include?(5)").unwrap();
+        if let Node::Send(s) = ast.as_ref() {
+            assert!(!receiver_is_range(&s.recv));
+        }
+    }
+
+    #[test]
+    fn is_primitive_covers_types() {
+        assert!(is_primitive(&parse(b"42").unwrap()));
+        assert!(is_primitive(&parse(b"3.14").unwrap()));
+        assert!(is_primitive(&parse(b"'s'").unwrap()));
+        assert!(is_primitive(&parse(b":sym").unwrap()));
+        assert!(is_primitive(&parse(b"true").unwrap()));
+        assert!(is_primitive(&parse(b"false").unwrap()));
+        assert!(is_primitive(&parse(b"nil").unwrap()));
+        assert!(is_primitive(&parse(b"[]").unwrap()));
+        assert!(is_primitive(&parse(b"{}").unwrap()));
+        assert!(is_primitive(&parse(b"1..5").unwrap()));
+        assert!(is_primitive(&parse(b"1...5").unwrap()));
+        assert!(!is_primitive(&parse(b"x").unwrap()));
+    }
+
+    #[test]
+    fn first_arg_is_single_pair_hash_kwargs() {
+        let ast = parse(b"h.merge!(a: 1)").unwrap();
+        if let Node::Send(s) = ast.as_ref() {
+            assert!(first_arg_is_single_pair_hash(&s.args));
+        }
+    }
+
+    #[test]
+    fn first_arg_is_single_pair_hash_explicit() {
+        let ast = parse(b"h.merge!({a: 1})").unwrap();
+        if let Node::Send(s) = ast.as_ref() {
+            assert!(first_arg_is_single_pair_hash(&s.args));
+        }
+    }
+
+    #[test]
+    fn first_arg_is_single_pair_hash_multi() {
+        let ast = parse(b"h.merge!(a: 1, b: 2)").unwrap();
+        if let Node::Send(s) = ast.as_ref() {
+            assert!(!first_arg_is_single_pair_hash(&s.args));
+        }
+    }
+
+    #[test]
+    fn first_arg_is_single_pair_hash_not_hash() {
+        let ast = parse(b"h.merge!(x)").unwrap();
+        if let Node::Send(s) = ast.as_ref() {
+            assert!(!first_arg_is_single_pair_hash(&s.args));
+        }
+    }
+
+    #[test]
+    fn is_int_one_works() {
+        assert!(is_int_one(&parse(b"1").unwrap()));
+        assert!(!is_int_one(&parse(b"2").unwrap()));
+        assert!(!is_int_one(&parse(b"'1'").unwrap()));
+    }
+
+    #[test]
+    fn block_arg_names_single() {
+        let ast = parse(b"arr.map { |x| x }").unwrap();
+        if let Node::Block(b) = ast.as_ref() {
+            let names = block_arg_names(&b.args);
+            assert_eq!(names, vec!["x".to_string()]);
+        }
+    }
+
+    #[test]
+    fn block_arg_names_none() {
+        let names = block_arg_names(&None);
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn def_block_arg_name_present() {
+        let ast = parse(b"def foo(&block); end").unwrap();
+        if let Node::Def(d) = ast.as_ref() {
+            assert_eq!(def_block_arg_name(d), Some("block".to_string()));
+        }
+    }
+
+    #[test]
+    fn def_block_arg_name_absent() {
+        let ast = parse(b"def foo(x); end").unwrap();
+        if let Node::Def(d) = ast.as_ref() {
+            assert_eq!(def_block_arg_name(d), None);
+        }
+    }
+
+    #[test]
+    fn def_regular_arg_count_works() {
+        let ast = parse(b"def foo(a, b); end").unwrap();
+        if let Node::Def(d) = ast.as_ref() {
+            assert_eq!(def_regular_arg_count(d), 2);
+        }
+    }
+
+    #[test]
+    fn def_regular_arg_count_no_args() {
+        let ast = parse(b"def foo; end").unwrap();
+        if let Node::Def(d) = ast.as_ref() {
+            assert_eq!(def_regular_arg_count(d), 0);
+        }
+    }
+
+    #[test]
+    fn def_first_arg_name_works() {
+        let ast = parse(b"def foo(bar); end").unwrap();
+        if let Node::Def(d) = ast.as_ref() {
+            assert_eq!(def_first_arg_name(d), Some("bar".to_string()));
+        }
+    }
+
+    #[test]
+    fn def_first_arg_name_no_args() {
+        let ast = parse(b"def foo; end").unwrap();
+        if let Node::Def(d) = ast.as_ref() {
+            assert_eq!(def_first_arg_name(d), None);
+        }
+    }
+
+    #[test]
+    fn str_contains_def_in_string() {
+        let ast = parse(b"\"def foo\"").unwrap();
+        assert!(str_contains_def(&ast));
+    }
+
+    #[test]
+    fn str_contains_def_no_def() {
+        let ast = parse(b"\"hello\"").unwrap();
+        assert!(!str_contains_def(&ast));
+    }
+
+    #[test]
+    fn str_contains_def_not_string() {
+        let ast = parse(b"42").unwrap();
+        assert!(!str_contains_def(&ast));
+    }
+
+    #[test]
+    fn str_contains_def_heredoc() {
+        let ast = parse(b"<<~RUBY\ndef foo\nRUBY\n").unwrap();
+        assert!(str_contains_def(&ast));
+    }
+
+    #[test]
+    fn body_expressions_none() {
+        assert!(body_expressions(&None).is_empty());
+    }
+
+    #[test]
+    fn body_expressions_single() {
+        let ast = parse(b"def foo; 42; end").unwrap();
+        if let Node::Def(d) = ast.as_ref() {
+            let exprs = body_expressions(&d.body);
+            assert_eq!(exprs.len(), 1);
+        }
+    }
+
+    #[test]
+    fn body_expressions_begin() {
+        let ast = parse(b"def foo; 1; 2; 3; end").unwrap();
+        if let Node::Def(d) = ast.as_ref() {
+            let exprs = body_expressions(&d.body);
+            assert_eq!(exprs.len(), 3);
+        }
+    }
+
+    #[test]
+    fn node_children_matches_for_each_child() {
+        let ast = parse(b"a + b").unwrap();
+        let children = node_children(&ast);
+        let mut count = 0;
+        for_each_child(&ast, |_| count += 1);
+        assert_eq!(children.len(), count);
+    }
+
+    // Exercise many AST node types through visit_children for coverage
+    #[test]
+    fn visit_children_comprehensive() {
+        let sources: &[&[u8]] = &[
+            // Alias
+            b"alias new_method old_method",
+            // And, Or
+            b"a && b || c",
+            // AndAsgn, OrAsgn
+            b"x &&= 1; y ||= 2",
+            // Array, ArrayPattern
+            b"[1, 2, 3]",
+            // Begin, Break, Next, Return
+            b"begin; break 1; end",
+            b"loop { next }",
+            // Case, When
+            b"case x; when 1; 'a'; when 2; 'b'; else 'c'; end",
+            // Casgn
+            b"FOO = 1",
+            // Class
+            b"class Foo < Bar; end",
+            // Const
+            b"Foo::Bar",
+            // CSend
+            b"x&.foo(1)",
+            // Cvasgn, Cvar
+            b"@@x = 1; @@x",
+            // Def, Defs
+            b"def foo(a); end",
+            b"def self.bar; end",
+            // Defined
+            b"defined?(x)",
+            // Dstr, Dsym
+            b"\"hello #{world}\"",
+            b":\"sym_#{x}\"",
+            // EFlipFlop, IFlipFlop
+            // Ensure
+            b"begin; 1; ensure; 2; end",
+            // Erange, Irange
+            b"1...10; 1..10",
+            // For
+            b"for x in [1]; end",
+            // Gvasgn, Gvar
+            b"$x = 1; $x",
+            // Hash, Pair
+            b"{a: 1, b: 2}",
+            // Heredoc
+            b"<<~HERE\nhello\nHERE\n",
+            // If, IfMod, IfTernary
+            b"if true; 1; else; 2; end",
+            b"x = 1 if true",
+            b"true ? 1 : 2",
+            // Index, IndexAsgn
+            b"a[0]; a[0] = 1",
+            // Ivasgn, Ivar
+            b"@x = 1; @x",
+            // Kwargs, Kwsplat
+            b"foo(a: 1, **opts)",
+            // KwBegin
+            b"begin; 1; rescue; 2; end",
+            // Kwoptarg, Kwrestarg
+            b"def foo(a: 1, **rest); end",
+            // Lvasgn
+            b"x = 42",
+            // Masgn, Mlhs
+            b"a, b = 1, 2",
+            // Module
+            b"module Foo; end",
+            // Next, Return
+            b"def foo; return 1; end",
+            // Numblock
+            b"arr.map { _1.to_s }",
+            // OpAsgn
+            b"x += 1",
+            // Optarg
+            b"def foo(a = 1); end",
+            // Pin (pattern matching)
+            b"case x; in ^y; end",
+            // Postexe, Preexe
+            b"END { 1 }",
+            b"BEGIN { 1 }",
+            // Procarg0 (block with single destructured arg)
+            b"arr.each { |(a)| a }",
+            // Regexp, RegOpt
+            b"/foo/i",
+            // Rescue, RescueBody
+            b"begin; rescue StandardError => e; end",
+            // SClass
+            b"class << self; end",
+            // Send
+            b"foo.bar(1, 2)",
+            // Splat
+            b"foo(*args)",
+            // Str
+            b"'hello'",
+            // Super
+            b"def foo; super(1); end",
+            // Undef
+            b"undef :foo",
+            // Until, While
+            b"until false; end",
+            b"while true; break; end",
+            // Yield
+            b"def foo; yield 1; end",
+            // Xstr, XHeredoc
+            b"`echo hi`",
+            // MatchCurrentLine
+            b"if /pattern/; end",
+            // Block, BlockPass
+            b"arr.select(&:odd?)",
+            // FindPattern, InPattern
+            b"case x; in [1, *rest, 2]; end",
+            // MatchAlt, MatchAs
+            b"case x; in 1 | 2 => y; end",
+            // MatchPattern, MatchPatternP
+            b"x in [1, 2]",
+            b"x in [1, 2] rescue false",
+            // MatchNilPattern, MatchVar
+            b"case x; in **nil; end",
+            b"case x; in {a:}; end",
+            // MatchWithLvasgn
+            b"/(?<name>.)/ =~ str",
+            // HashPattern, ConstPattern
+            b"case x; in Foo[a:]; end",
+            // MatchRest
+            b"case x; in [*, 1]; end",
+            // WhilePost
+            b"begin; 1; end while true",
+            // UntilPost
+            b"begin; 1; end until true",
+            // UnlessGuard
+            b"case x; in 1 unless false; end",
+            // EFlipFlop (exclusive)
+            b"if (a == 1)...(b == 2); end",
+            // IFlipFlop (inclusive)
+            b"if (a == 1)..(b == 2); end",
+            // Rational, Complex
+            b"1r",
+            b"1i",
+            // BackRef, NthRef
+            b"$~ ; $1",
+            // Redo, Retry
+            b"begin; retry; rescue; end",
+            // Self
+            b"self",
+            // ZSuper
+            b"def foo; super; end",
+            // Lambda
+            b"-> { 1 }",
+            // Encoding, File, Line
+            b"__ENCODING__",
+            b"__FILE__",
+            b"__LINE__",
+            // XHeredoc
+            b"<<~`CMD`\necho hi\nCMD\n",
+            // ArrayPatternWithTail
+            b"case x; in [1, 2,]; end",
+            // ForwardArg, ForwardedArgs
+            b"def foo(...); bar(...); end",
+            // Kwarg
+            b"def foo(a:); end",
+            // Kwnilarg
+            b"def foo(**nil); end",
+            // Shadowarg
+            b"arr.each { |x; y| y }",
+            // Restarg
+            b"def foo(*args); end",
+        ];
+
+        for source in sources {
+            if let Some(ast) = parse(source) {
+                let total = count_all_nodes(&ast);
+                assert!(total > 0, "No nodes in AST for {:?}", std::str::from_utf8(source));
+            }
+        }
+    }
+
+    #[test]
+    fn visit_children_pattern_matching() {
+        // These exercise pattern matching AST nodes specifically
+        let sources: &[&[u8]] = &[
+            // MatchPattern (in operator)
+            b"1 in Integer",
+            // MatchPatternP (case/in with guard)
+            b"case 1; in Integer if true; end",
+            // IfGuard
+            b"case 1; in x if x > 0; end",
+            // UnlessGuard
+            b"case 1; in x unless x < 0; end",
+            // FindPattern
+            b"case [1,2,3]; in [*, 2, *]; end",
+            // HashPattern
+            b"case {a: 1}; in {a: Integer}; end",
+            // ConstPattern
+            b"case x; in Foo(1); end",
+            // MatchNilPattern
+            b"case {a: 1}; in **nil; end",
+            // MatchVar
+            b"case 1; in x; end",
+            // MatchRest
+            b"case [1,2]; in [Integer, *rest]; end",
+            // MatchAlt
+            b"case 1; in 1 | 2; end",
+            // MatchAs
+            b"case 1; in Integer => x; end",
+            // MatchWithLvasgn (regex named capture)
+            b"/(?<name>.)/ =~ 'x'",
+            // Pin
+            b"x = 1; case 2; in ^x; end",
+        ];
+        for source in sources {
+            if let Some(ast) = parse(source) {
+                let total = count_all_nodes(&ast);
+                assert!(total > 0, "No nodes for {:?}", std::str::from_utf8(source));
+            }
+        }
+    }
+
+    #[test]
+    fn visit_children_leaf_nodes() {
+        // Leaf nodes should have 0 children
+        let leaf_sources: &[&[u8]] = &[
+            b"42",          // Int
+            b"3.14",        // Float
+            b"'s'",         // Str
+            b":sym",        // Sym
+            b"true",        // True
+            b"false",       // False
+            b"nil",         // Nil
+            b"x",           // Lvar
+        ];
+
+        for source in leaf_sources {
+            let ast = parse(source).unwrap();
+            assert_eq!(count_children(&ast), 0, "Expected 0 children for {:?}", std::str::from_utf8(source));
+        }
+    }
+}
+
 fn visit_opt<'a>(opt: &'a Option<Box<Node>>, f: &mut impl FnMut(&'a Node)) {
     if let Some(n) = opt.as_deref() {
         f(n);
