@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.0] - 2026-03-11
+
+### Changed
+
+- Default `--format file` output now shows human-readable explanation with config key in brackets:
+  `L73  Hash#fetch with second argument is slower than Hash#fetch with block [fetch_with_argument_vs_block]`
+- Performance: use `HashSet` instead of `Vec` for file exclusion lookup (O(1) vs O(n))
+
+### Internal
+
+- Test coverage increased from 61.87% to 93.10% (242 tests)
+- Upgrade GitHub Actions to Node.js 24 compatible versions (checkout@v6, upload-artifact@v7, download-artifact@v8)
+
 ## [1.1.1] - 2026-03-11
 
 ### Changed
