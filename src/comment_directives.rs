@@ -305,4 +305,74 @@ mod tests {
         let set = parse_and_build(source);
         assert!(!set.is_disabled(1, OffenseKind::ShuffleFirstVsSample));
     }
+
+    #[test]
+    fn disable_next_line_all() {
+        let source = "# rubyfast:disable-next-line all\nx = [].shuffle.first\ny = 1\n";
+        let set = parse_and_build(source);
+        assert!(set.is_disabled(2, OffenseKind::ShuffleFirstVsSample));
+        assert!(set.is_disabled(2, OffenseKind::ForLoopVsEach));
+        assert!(!set.is_disabled(3, OffenseKind::ShuffleFirstVsSample));
+    }
+
+    #[test]
+    fn block_disable_all_and_enable_all() {
+        let source = "# rubyfast:disable all\nx = 1\ny = 2\n# rubyfast:enable all\nz = 3\n";
+        let set = parse_and_build(source);
+        assert!(set.is_disabled(2, OffenseKind::ShuffleFirstVsSample));
+        assert!(set.is_disabled(3, OffenseKind::ForLoopVsEach));
+        assert!(!set.is_disabled(5, OffenseKind::ShuffleFirstVsSample));
+    }
+
+    #[test]
+    fn multiple_rules_in_block_disable() {
+        let source = "# rubyfast:disable shuffle_first_vs_sample, for_loop_vs_each\nx = 1\n# rubyfast:enable shuffle_first_vs_sample, for_loop_vs_each\ny = 2\n";
+        let set = parse_and_build(source);
+        assert!(set.is_disabled(2, OffenseKind::ShuffleFirstVsSample));
+        assert!(set.is_disabled(2, OffenseKind::ForLoopVsEach));
+        assert!(!set.is_disabled(4, OffenseKind::ShuffleFirstVsSample));
+        assert!(!set.is_disabled(4, OffenseKind::ForLoopVsEach));
+    }
+
+    #[test]
+    fn unclosed_block_disable_all_extends_to_eof() {
+        let source = "# rubyfast:disable all\nx = 1\ny = 2\n";
+        let set = parse_and_build(source);
+        assert!(set.is_disabled(2, OffenseKind::ShuffleFirstVsSample));
+        assert!(set.is_disabled(3, OffenseKind::GsubVsTr));
+    }
+
+    #[test]
+    fn empty_disable_directive_ignored() {
+        let source = "x = 1 # rubyfast:disable\n";
+        let set = parse_and_build(source);
+        assert!(!set.is_disabled(1, OffenseKind::ShuffleFirstVsSample));
+    }
+
+    #[test]
+    fn empty_enable_directive_ignored() {
+        let source = "# rubyfast:enable\n";
+        let set = parse_and_build(source);
+        assert!(!set.is_disabled(1, OffenseKind::ShuffleFirstVsSample));
+    }
+
+    #[test]
+    fn is_trailing_at_start_of_file() {
+        let source = b"# comment\nx = 1\n";
+        assert!(!is_trailing_comment(source, 0));
+    }
+
+    #[test]
+    fn unrecognized_directive_action_ignored() {
+        let source = "x = 1 # rubyfast:freeze all\n";
+        let set = parse_and_build(source);
+        assert!(!set.is_disabled(1, OffenseKind::ShuffleFirstVsSample));
+    }
+
+    #[test]
+    fn enable_without_matching_disable_is_noop() {
+        let source = "# rubyfast:enable for_loop_vs_each\nfor x in [1]; end\n";
+        let set = parse_and_build(source);
+        assert!(!set.is_disabled(2, OffenseKind::ForLoopVsEach));
+    }
 }

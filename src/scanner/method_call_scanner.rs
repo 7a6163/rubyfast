@@ -608,4 +608,199 @@ mod tests {
         let o = parse_and_collect(b"->(x) { x.to_s }");
         assert!(!o.iter().any(|x| x.kind == OffenseKind::BlockVsSymbolToProc));
     }
+
+    // --- Additional edge case tests ---
+
+    #[test]
+    fn first_not_on_shuffle_no_fire() {
+        let o = parse_and_collect(b"arr.first");
+        assert!(!o
+            .iter()
+            .any(|x| x.kind == OffenseKind::ShuffleFirstVsSample));
+    }
+
+    #[test]
+    fn reverse_not_each_no_fire() {
+        let o = parse_and_collect(b"arr.reverse.map { |x| x }");
+        assert!(!o
+            .iter()
+            .any(|x| x.kind == OffenseKind::ReverseEachVsReverseEach));
+    }
+
+    #[test]
+    fn select_first_with_block_pass() {
+        let o = parse_and_collect(b"arr.select(&:odd?).first");
+        assert!(o.iter().any(|x| x.kind == OffenseKind::SelectFirstVsDetect));
+    }
+
+    #[test]
+    fn select_last_with_block_pass() {
+        let o = parse_and_collect(b"arr.select(&:odd?).last");
+        assert!(o
+            .iter()
+            .any(|x| x.kind == OffenseKind::SelectLastVsReverseDetect));
+    }
+
+    #[test]
+    fn map_flatten_with_arg_2_no_fire() {
+        let o = parse_and_collect(b"arr.map { |e| [e] }.flatten(2)");
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::MapFlattenVsFlatMap));
+    }
+
+    #[test]
+    fn select_first_with_args_no_fire() {
+        let o = parse_and_collect(b"arr.select { |x| x > 1 }.first(3)");
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::SelectFirstVsDetect));
+    }
+
+    #[test]
+    fn select_last_with_args_no_fire() {
+        let o = parse_and_collect(b"arr.select { |x| x > 1 }.last(3)");
+        assert!(!o
+            .iter()
+            .any(|x| x.kind == OffenseKind::SelectLastVsReverseDetect));
+    }
+
+    #[test]
+    fn module_eval_with_def_string() {
+        let o = parse_and_collect(b"klass.module_eval(\"def foo; end\")");
+        assert!(o.iter().any(|x| x.kind == OffenseKind::ModuleEval));
+    }
+
+    #[test]
+    fn module_eval_without_def_no_fire() {
+        let o = parse_and_collect(b"klass.module_eval(\"puts 1\")");
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::ModuleEval));
+    }
+
+    #[test]
+    fn module_eval_non_string_no_fire() {
+        let o = parse_and_collect(b"klass.module_eval(some_var)");
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::ModuleEval));
+    }
+
+    #[test]
+    fn module_eval_with_block() {
+        let o = parse_and_collect(b"klass.module_eval { define_method(:foo) {} }");
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::ModuleEval));
+    }
+
+    #[test]
+    fn block_multiple_args_no_symbol_to_proc() {
+        let o = parse_and_collect(b"arr.each_with_object([]) { |x, acc| x.to_s }");
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::BlockVsSymbolToProc));
+    }
+
+    #[test]
+    fn block_no_body_no_symbol_to_proc() {
+        // Empty block body
+        let o = parse_and_collect(b"arr.map { |x| }");
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::BlockVsSymbolToProc));
+    }
+
+    #[test]
+    fn block_receiver_not_lvar_no_symbol_to_proc() {
+        let o = parse_and_collect(b"arr.map { |x| @y.to_s }");
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::BlockVsSymbolToProc));
+    }
+
+    #[test]
+    fn block_receiver_is_primitive_no_symbol_to_proc() {
+        let o = parse_and_collect(b"arr.map { |x| 42.to_s }");
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::BlockVsSymbolToProc));
+    }
+
+    #[test]
+    fn hash_merge_bang_no_args_no_fire() {
+        let o = parse_and_collect(b"h.merge!");
+        assert!(!o
+            .iter()
+            .any(|x| x.kind == OffenseKind::HashMergeBangVsHashBrackets));
+    }
+
+    #[test]
+    fn gsub_one_arg_no_fire() {
+        let o = parse_and_collect(b"s.gsub('x')");
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::GsubVsTr));
+    }
+
+    #[test]
+    fn fetch_one_arg_no_fire() {
+        let o = parse_and_collect(b"h.fetch(:key)");
+        assert!(!o
+            .iter()
+            .any(|x| x.kind == OffenseKind::FetchWithArgumentVsBlock));
+    }
+
+    #[test]
+    fn include_not_on_range_no_fire() {
+        let o = parse_and_collect(b"[1,2,3].include?(5)");
+        assert!(!o
+            .iter()
+            .any(|x| x.kind == OffenseKind::IncludeVsCoverOnRange));
+    }
+
+    #[test]
+    fn include_on_exclusive_range() {
+        let o = parse_and_collect(b"(1...10).include?(5)");
+        assert!(o
+            .iter()
+            .any(|x| x.kind == OffenseKind::IncludeVsCoverOnRange));
+    }
+
+    #[test]
+    fn include_on_parenthesized_range() {
+        // Single-paren range — parsed as Begin(Irange)
+        let o = parse_and_collect(b"(1..10).include?(5)");
+        assert!(o
+            .iter()
+            .any(|x| x.kind == OffenseKind::IncludeVsCoverOnRange));
+    }
+
+    #[test]
+    fn sort_without_block_no_fire() {
+        let o = parse_and_collect(b"arr.sort");
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::SortVsSortBy));
+    }
+
+    #[test]
+    fn block_wrong_lvar_name_no_symbol_to_proc() {
+        let o = parse_and_collect(b"arr.map { |x| y.to_s }");
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::BlockVsSymbolToProc));
+    }
+
+    #[test]
+    fn block_with_args_on_outer_no_symbol_to_proc() {
+        let o = parse_and_collect(b"arr.inject(0) { |x| x.to_s }");
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::BlockVsSymbolToProc));
+    }
+
+    #[test]
+    fn module_eval_with_heredoc_containing_def() {
+        let o = parse_and_collect(b"klass.module_eval(<<~RUBY)\n  def foo\n    42\n  end\nRUBY\n");
+        assert!(o.iter().any(|x| x.kind == OffenseKind::ModuleEval));
+    }
+
+    #[test]
+    fn keys_each_with_keys_having_args_no_fire() {
+        // keys("x") is not Hash#keys — should not fire
+        let o = parse_and_collect(b"h.keys(\"x\").each { |k| k }");
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::KeysEachVsEachKey));
+    }
+
+    #[test]
+    fn each_with_index_without_block_still_fires() {
+        let o = parse_and_collect(b"arr.each_with_index");
+        assert!(o
+            .iter()
+            .any(|x| x.kind == OffenseKind::EachWithIndexVsWhile));
+    }
+
+    #[test]
+    fn fetch_with_block_pass_no_fire() {
+        let o = parse_and_collect(b"h.fetch(:key, &block)");
+        assert!(!o
+            .iter()
+            .any(|x| x.kind == OffenseKind::FetchWithArgumentVsBlock));
+    }
 }

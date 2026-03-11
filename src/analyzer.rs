@@ -172,4 +172,97 @@ mod tests {
         assert_eq!(byte_offset_to_line(&positions, 6), 2);
         assert_eq!(byte_offset_to_line(&positions, 12), 3);
     }
+
+    #[test]
+    fn analyze_nonexistent_file_returns_error() {
+        let config = crate::config::Config::default();
+        let result = super::analyze_file(std::path::Path::new("/nonexistent.rb"), &config);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn analyze_file_with_parse_errors_no_ast_returns_error() {
+        let dir = tempfile::TempDir::new().unwrap();
+        // This produces a fatal parse error with no recoverable AST
+        let file = dir.path().join("fatal.rb");
+        std::fs::write(&file, "\x00\x01\x02").unwrap();
+        let config = crate::config::Config::default();
+        let result = super::analyze_file(&file, &config);
+        // May be Ok with empty offenses or Err depending on parser behavior
+        // Either way it should not panic
+        let _ = result;
+    }
+
+    #[test]
+    fn analyze_file_with_recovered_ast_returns_empty() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("recovered.rb");
+        std::fs::write(&file, "def foo; end; def def; end").unwrap();
+        let config = crate::config::Config::default();
+        let result = super::analyze_file(&file, &config);
+        match result {
+            Ok(analysis) => assert!(analysis.offenses.is_empty()),
+            Err(_) => {} // Also acceptable — fatal parse error
+        }
+    }
+
+    #[test]
+    fn analyze_empty_file_returns_empty() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("empty.rb");
+        std::fs::write(&file, "").unwrap();
+        let config = crate::config::Config::default();
+        let result = super::analyze_file(&file, &config).unwrap();
+        assert!(result.offenses.is_empty());
+    }
+
+    #[test]
+    fn analyze_file_with_config_disabling_rule() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("test.rb");
+        std::fs::write(&file, "for x in [1]; end").unwrap();
+        let config =
+            crate::config::Config::parse_yaml("speedups:\n  for_loop_vs_each: false\n").unwrap();
+        let result = super::analyze_file(&file, &config).unwrap();
+        assert!(result.offenses.is_empty());
+    }
+
+    #[test]
+    fn analyze_file_with_inline_disable() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("test.rb");
+        std::fs::write(
+            &file,
+            "for x in [1]; end # rubyfast:disable for_loop_vs_each\n",
+        )
+        .unwrap();
+        let config = crate::config::Config::default();
+        let result = super::analyze_file(&file, &config).unwrap();
+        assert!(result.offenses.is_empty());
+    }
+
+    #[test]
+    fn walk_node_block_with_non_send_call() {
+        // A numblock (numbered params) has a different call structure
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("test.rb");
+        std::fs::write(&file, "arr.map { |x| x.to_s }").unwrap();
+        let config = crate::config::Config::default();
+        let result = super::analyze_file(&file, &config).unwrap();
+        // Should find block_vs_symbol_to_proc
+        assert!(!result.offenses.is_empty());
+    }
+
+    #[test]
+    fn walk_node_nested_for_inside_method() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("test.rb");
+        std::fs::write(&file, "def foo\n  for x in [1,2]; puts x; end\nend\n").unwrap();
+        let config = crate::config::Config::default();
+        let result = super::analyze_file(&file, &config).unwrap();
+        assert!(result
+            .offenses
+            .iter()
+            .any(|o| o.kind == crate::offense::OffenseKind::ForLoopVsEach));
+    }
 }

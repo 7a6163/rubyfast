@@ -114,4 +114,80 @@ mod tests {
         assert_eq!(config.exclude_patterns.len(), 2);
         assert_eq!(config.exclude_patterns[0], "vendor/**/*.rb");
     }
+
+    #[test]
+    fn all_speedups_true_enables_all() {
+        let yaml = "speedups:\n  for_loop_vs_each: true\n  gsub_vs_tr: true\n";
+        let config = Config::parse_yaml(yaml).unwrap();
+        assert!(config.is_enabled(OffenseKind::ForLoopVsEach));
+        assert!(config.is_enabled(OffenseKind::GsubVsTr));
+    }
+
+    #[test]
+    fn unknown_speedup_key_ignored() {
+        let yaml = "speedups:\n  made_up_rule: false\n";
+        let config = Config::parse_yaml(yaml).unwrap();
+        for kind in OffenseKind::all() {
+            assert!(config.is_enabled(*kind));
+        }
+    }
+
+    #[test]
+    fn invalid_yaml_returns_error() {
+        let result = Config::parse_yaml("speedups: [invalid");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn load_rubyfast_yml() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join(".rubyfast.yml"),
+            "speedups:\n  gsub_vs_tr: false\n",
+        )
+        .unwrap();
+        let config = Config::load(dir.path()).unwrap();
+        assert!(!config.is_enabled(OffenseKind::GsubVsTr));
+    }
+
+    #[test]
+    fn load_fasterer_yml_fallback() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join(".fasterer.yml"),
+            "speedups:\n  for_loop_vs_each: false\n",
+        )
+        .unwrap();
+        let config = Config::load(dir.path()).unwrap();
+        assert!(!config.is_enabled(OffenseKind::ForLoopVsEach));
+    }
+
+    #[test]
+    fn load_no_config_returns_default() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let config = Config::load(dir.path()).unwrap();
+        for kind in OffenseKind::all() {
+            assert!(config.is_enabled(*kind));
+        }
+    }
+
+    #[test]
+    fn from_file_nonexistent_returns_error() {
+        let result = Config::from_file(std::path::Path::new("/nonexistent/.rubyfast.yml"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn load_walks_up_parent_directories() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join(".rubyfast.yml"),
+            "speedups:\n  gsub_vs_tr: false\n",
+        )
+        .unwrap();
+        let sub = dir.path().join("nested").join("deep");
+        std::fs::create_dir_all(&sub).unwrap();
+        let config = Config::load(&sub).unwrap();
+        assert!(!config.is_enabled(OffenseKind::GsubVsTr));
+    }
 }

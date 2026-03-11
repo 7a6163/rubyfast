@@ -129,4 +129,41 @@ mod tests {
             panic!("Expected For node");
         }
     }
+
+    #[test]
+    fn extract_trimmed_valid() {
+        let source = b"  hello  ";
+        let result = extract_trimmed(source, 0, 9);
+        assert_eq!(result, Some("hello".to_string()));
+    }
+
+    #[test]
+    fn extract_trimmed_start_ge_end() {
+        assert_eq!(extract_trimmed(b"hello", 5, 3), None);
+        assert_eq!(extract_trimmed(b"hello", 3, 3), None);
+    }
+
+    #[test]
+    fn extract_trimmed_end_gt_len() {
+        assert_eq!(extract_trimmed(b"hi", 0, 10), None);
+    }
+
+    #[test]
+    fn extract_trimmed_empty_after_trim() {
+        let result = extract_trimmed(b"   ", 0, 3);
+        assert_eq!(result, Some("".to_string()));
+    }
+
+    #[test]
+    fn scan_always_returns_offense() {
+        // Even when fix fails, we should still get an offense
+        let source = b"for x in arr; end";
+        let result = lib_ruby_parser::Parser::new(source.to_vec(), Default::default()).do_parse();
+        let ast = result.ast.unwrap();
+        if let lib_ruby_parser::Node::For(f) = ast.as_ref() {
+            let offenses = scan(f, source);
+            assert_eq!(offenses.len(), 1);
+            assert_eq!(offenses[0].kind, OffenseKind::ForLoopVsEach);
+        }
+    }
 }
