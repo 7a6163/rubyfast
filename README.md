@@ -1,5 +1,10 @@
 # rubyfast
 
+[![CI](https://github.com/7a6163/rubyfast/actions/workflows/ci.yml/badge.svg)](https://github.com/7a6163/rubyfast/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/7a6163/rubyfast/graph/badge.svg)](https://codecov.io/gh/7a6163/rubyfast)
+[![Crates.io](https://img.shields.io/crates/v/rubyfast)](https://crates.io/crates/rubyfast)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A Ruby performance linter rewritten in Rust. Detects 19 common performance anti-patterns in Ruby code.
 
 Rust rewrite of [fasterer](https://github.com/DamirSvrtan/fasterer) — same detection rules, but faster execution, parallel file scanning, and zero Ruby runtime dependency.
