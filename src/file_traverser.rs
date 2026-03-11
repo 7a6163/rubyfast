@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
 
-use crate::analyzer::{analyze_file, AnalysisResult, ParseError};
+use crate::analyzer::{AnalysisResult, ParseError, analyze_file};
 use crate::config::Config;
 
 /// Result of traversing and analyzing all files.

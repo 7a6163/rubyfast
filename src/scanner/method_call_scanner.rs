@@ -1,5 +1,5 @@
-use lib_ruby_parser::nodes::{Block, Send};
 use lib_ruby_parser::Node;
+use lib_ruby_parser::nodes::{Block, Send};
 
 use crate::ast_helpers::*;
 use crate::fix::Fix;
@@ -185,16 +185,18 @@ fn check_keys_each(send: &Send, offenses: &mut Vec<Offense>) {
         return;
     }
     if let Some(recv_send) = receiver_as_send(&send.recv)
-        && recv_send.method_name == "keys" && recv_send.args.is_empty() {
-            let offense = match (recv_send.dot_l.as_ref(), send.selector_l.as_ref()) {
-                (Some(dot_l), Some(sel_l)) => {
-                    let fix = Fix::single(dot_l.begin, sel_l.end, ".each_key");
-                    Offense::with_fix(OffenseKind::KeysEachVsEachKey, send.expression_l.begin, fix)
-                }
-                _ => Offense::new(OffenseKind::KeysEachVsEachKey, send.expression_l.begin),
-            };
-            offenses.push(offense);
-        }
+        && recv_send.method_name == "keys"
+        && recv_send.args.is_empty()
+    {
+        let offense = match (recv_send.dot_l.as_ref(), send.selector_l.as_ref()) {
+            (Some(dot_l), Some(sel_l)) => {
+                let fix = Fix::single(dot_l.begin, sel_l.end, ".each_key");
+                Offense::with_fix(OffenseKind::KeysEachVsEachKey, send.expression_l.begin, fix)
+            }
+            _ => Offense::new(OffenseKind::KeysEachVsEachKey, send.expression_l.begin),
+        };
+        offenses.push(offense);
+    }
 }
 
 /// `.select{}.first` → `.detect{}` (when receiver is a plain Send, not Block)
@@ -203,27 +205,29 @@ fn check_select_first(send: &Send, offenses: &mut Vec<Offense>) {
         return;
     }
     if let Some(recv_send) = receiver_as_send(&send.recv)
-        && recv_send.method_name == "select" && has_block_pass(&recv_send.args) {
-            let offense = match (recv_send.selector_l.as_ref(), send.dot_l.as_ref()) {
-                (Some(sel_l), Some(dot_l)) => {
-                    let fix = Fix::two(
-                        sel_l.begin,
-                        sel_l.end,
-                        "detect",
-                        dot_l.begin,
-                        send.expression_l.end,
-                        "",
-                    );
-                    Offense::with_fix(
-                        OffenseKind::SelectFirstVsDetect,
-                        send.expression_l.begin,
-                        fix,
-                    )
-                }
-                _ => Offense::new(OffenseKind::SelectFirstVsDetect, send.expression_l.begin),
-            };
-            offenses.push(offense);
-        }
+        && recv_send.method_name == "select"
+        && has_block_pass(&recv_send.args)
+    {
+        let offense = match (recv_send.selector_l.as_ref(), send.dot_l.as_ref()) {
+            (Some(sel_l), Some(dot_l)) => {
+                let fix = Fix::two(
+                    sel_l.begin,
+                    sel_l.end,
+                    "detect",
+                    dot_l.begin,
+                    send.expression_l.end,
+                    "",
+                );
+                Offense::with_fix(
+                    OffenseKind::SelectFirstVsDetect,
+                    send.expression_l.begin,
+                    fix,
+                )
+            }
+            _ => Offense::new(OffenseKind::SelectFirstVsDetect, send.expression_l.begin),
+        };
+        offenses.push(offense);
+    }
 }
 
 /// `.select{}.last` → `.reverse.detect{}` (when receiver is a plain Send)
@@ -232,12 +236,14 @@ fn check_select_last(send: &Send, offenses: &mut Vec<Offense>) {
         return;
     }
     if let Some(recv_send) = receiver_as_send(&send.recv)
-        && recv_send.method_name == "select" && has_block_pass(&recv_send.args) {
-            offenses.push(Offense::new(
-                OffenseKind::SelectLastVsReverseDetect,
-                send.expression_l.begin,
-            ));
-        }
+        && recv_send.method_name == "select"
+        && has_block_pass(&recv_send.args)
+    {
+        offenses.push(Offense::new(
+            OffenseKind::SelectLastVsReverseDetect,
+            send.expression_l.begin,
+        ));
+    }
 }
 
 /// `.map{}.flatten(1)` → `.flat_map{}` (when receiver is a plain Send)
@@ -341,12 +347,13 @@ fn check_module_eval_send(send: &Send, offenses: &mut Vec<Offense>) {
         return;
     }
     if let Some(first_arg) = send.args.first()
-        && str_contains_def(first_arg) {
-            offenses.push(Offense::new(
-                OffenseKind::ModuleEval,
-                send.expression_l.begin,
-            ));
-        }
+        && str_contains_def(first_arg)
+    {
+        offenses.push(Offense::new(
+            OffenseKind::ModuleEval,
+            send.expression_l.begin,
+        ));
+    }
 }
 
 /// `.map { |x| x.foo }` → `.map(&:foo)`
@@ -397,12 +404,13 @@ fn check_block_vs_symbol_to_proc(send: &Send, block: &Block, offenses: &mut Vec<
 
     // Receiver must be an Lvar matching the block argument name
     if let Node::Lvar(lv) = receiver
-        && lv.name == *block_arg_name {
-            offenses.push(Offense::new(
-                OffenseKind::BlockVsSymbolToProc,
-                send.expression_l.begin,
-            ));
-        }
+        && lv.name == *block_arg_name
+    {
+        offenses.push(Offense::new(
+            OffenseKind::BlockVsSymbolToProc,
+            send.expression_l.begin,
+        ));
+    }
 }
 
 #[cfg(test)]
@@ -461,17 +469,19 @@ mod tests {
     #[test]
     fn shuffle_first() {
         let o = parse_and_collect(b"[].shuffle.first");
-        assert!(o
-            .iter()
-            .any(|x| x.kind == OffenseKind::ShuffleFirstVsSample));
+        assert!(
+            o.iter()
+                .any(|x| x.kind == OffenseKind::ShuffleFirstVsSample)
+        );
     }
 
     #[test]
     fn reverse_each() {
         let o = parse_and_collect(b"arr.reverse.each { |x| x }");
-        assert!(o
-            .iter()
-            .any(|x| x.kind == OffenseKind::ReverseEachVsReverseEach));
+        assert!(
+            o.iter()
+                .any(|x| x.kind == OffenseKind::ReverseEachVsReverseEach)
+        );
     }
 
     #[test]
@@ -501,57 +511,64 @@ mod tests {
     #[test]
     fn fetch_two_args() {
         let o = parse_and_collect(b"h.fetch(:key, [])");
-        assert!(o
-            .iter()
-            .any(|x| x.kind == OffenseKind::FetchWithArgumentVsBlock));
+        assert!(
+            o.iter()
+                .any(|x| x.kind == OffenseKind::FetchWithArgumentVsBlock)
+        );
     }
 
     #[test]
     fn fetch_with_block_no_fire() {
         let o = parse_and_collect(b"Rails.cache.fetch('key', expires_in: 1.hour) { compute }");
-        assert!(!o
-            .iter()
-            .any(|x| x.kind == OffenseKind::FetchWithArgumentVsBlock));
+        assert!(
+            !o.iter()
+                .any(|x| x.kind == OffenseKind::FetchWithArgumentVsBlock)
+        );
     }
 
     #[test]
     fn merge_bang_single_pair() {
         let o = parse_and_collect(b"h.merge!(item: 1)");
-        assert!(o
-            .iter()
-            .any(|x| x.kind == OffenseKind::HashMergeBangVsHashBrackets));
+        assert!(
+            o.iter()
+                .any(|x| x.kind == OffenseKind::HashMergeBangVsHashBrackets)
+        );
     }
 
     #[test]
     fn merge_bang_explicit_hash() {
         let o = parse_and_collect(b"h.merge!({item: 1})");
-        assert!(o
-            .iter()
-            .any(|x| x.kind == OffenseKind::HashMergeBangVsHashBrackets));
+        assert!(
+            o.iter()
+                .any(|x| x.kind == OffenseKind::HashMergeBangVsHashBrackets)
+        );
     }
 
     #[test]
     fn merge_bang_two_pairs_no_fire() {
         let o = parse_and_collect(b"h.merge!(a: 1, b: 2)");
-        assert!(!o
-            .iter()
-            .any(|x| x.kind == OffenseKind::HashMergeBangVsHashBrackets));
+        assert!(
+            !o.iter()
+                .any(|x| x.kind == OffenseKind::HashMergeBangVsHashBrackets)
+        );
     }
 
     #[test]
     fn each_with_index() {
         let o = parse_and_collect(b"arr.each_with_index { |x, i| x }");
-        assert!(o
-            .iter()
-            .any(|x| x.kind == OffenseKind::EachWithIndexVsWhile));
+        assert!(
+            o.iter()
+                .any(|x| x.kind == OffenseKind::EachWithIndexVsWhile)
+        );
     }
 
     #[test]
     fn include_on_range() {
         let o = parse_and_collect(b"(1..10).include?(5)");
-        assert!(o
-            .iter()
-            .any(|x| x.kind == OffenseKind::IncludeVsCoverOnRange));
+        assert!(
+            o.iter()
+                .any(|x| x.kind == OffenseKind::IncludeVsCoverOnRange)
+        );
     }
 
     #[test]
@@ -569,9 +586,10 @@ mod tests {
     #[test]
     fn select_last_with_block() {
         let o = parse_and_collect(b"arr.select { |x| x > 1 }.last");
-        assert!(o
-            .iter()
-            .any(|x| x.kind == OffenseKind::SelectLastVsReverseDetect));
+        assert!(
+            o.iter()
+                .any(|x| x.kind == OffenseKind::SelectLastVsReverseDetect)
+        );
     }
 
     #[test]
@@ -609,17 +627,19 @@ mod tests {
     #[test]
     fn first_not_on_shuffle_no_fire() {
         let o = parse_and_collect(b"arr.first");
-        assert!(!o
-            .iter()
-            .any(|x| x.kind == OffenseKind::ShuffleFirstVsSample));
+        assert!(
+            !o.iter()
+                .any(|x| x.kind == OffenseKind::ShuffleFirstVsSample)
+        );
     }
 
     #[test]
     fn reverse_not_each_no_fire() {
         let o = parse_and_collect(b"arr.reverse.map { |x| x }");
-        assert!(!o
-            .iter()
-            .any(|x| x.kind == OffenseKind::ReverseEachVsReverseEach));
+        assert!(
+            !o.iter()
+                .any(|x| x.kind == OffenseKind::ReverseEachVsReverseEach)
+        );
     }
 
     #[test]
@@ -631,9 +651,10 @@ mod tests {
     #[test]
     fn select_last_with_block_pass() {
         let o = parse_and_collect(b"arr.select(&:odd?).last");
-        assert!(o
-            .iter()
-            .any(|x| x.kind == OffenseKind::SelectLastVsReverseDetect));
+        assert!(
+            o.iter()
+                .any(|x| x.kind == OffenseKind::SelectLastVsReverseDetect)
+        );
     }
 
     #[test]
@@ -651,9 +672,10 @@ mod tests {
     #[test]
     fn select_last_with_args_no_fire() {
         let o = parse_and_collect(b"arr.select { |x| x > 1 }.last(3)");
-        assert!(!o
-            .iter()
-            .any(|x| x.kind == OffenseKind::SelectLastVsReverseDetect));
+        assert!(
+            !o.iter()
+                .any(|x| x.kind == OffenseKind::SelectLastVsReverseDetect)
+        );
     }
 
     #[test]
@@ -708,9 +730,10 @@ mod tests {
     #[test]
     fn hash_merge_bang_no_args_no_fire() {
         let o = parse_and_collect(b"h.merge!");
-        assert!(!o
-            .iter()
-            .any(|x| x.kind == OffenseKind::HashMergeBangVsHashBrackets));
+        assert!(
+            !o.iter()
+                .any(|x| x.kind == OffenseKind::HashMergeBangVsHashBrackets)
+        );
     }
 
     #[test]
@@ -722,34 +745,38 @@ mod tests {
     #[test]
     fn fetch_one_arg_no_fire() {
         let o = parse_and_collect(b"h.fetch(:key)");
-        assert!(!o
-            .iter()
-            .any(|x| x.kind == OffenseKind::FetchWithArgumentVsBlock));
+        assert!(
+            !o.iter()
+                .any(|x| x.kind == OffenseKind::FetchWithArgumentVsBlock)
+        );
     }
 
     #[test]
     fn include_not_on_range_no_fire() {
         let o = parse_and_collect(b"[1,2,3].include?(5)");
-        assert!(!o
-            .iter()
-            .any(|x| x.kind == OffenseKind::IncludeVsCoverOnRange));
+        assert!(
+            !o.iter()
+                .any(|x| x.kind == OffenseKind::IncludeVsCoverOnRange)
+        );
     }
 
     #[test]
     fn include_on_exclusive_range() {
         let o = parse_and_collect(b"(1...10).include?(5)");
-        assert!(o
-            .iter()
-            .any(|x| x.kind == OffenseKind::IncludeVsCoverOnRange));
+        assert!(
+            o.iter()
+                .any(|x| x.kind == OffenseKind::IncludeVsCoverOnRange)
+        );
     }
 
     #[test]
     fn include_on_parenthesized_range() {
         // Single-paren range — parsed as Begin(Irange)
         let o = parse_and_collect(b"(1..10).include?(5)");
-        assert!(o
-            .iter()
-            .any(|x| x.kind == OffenseKind::IncludeVsCoverOnRange));
+        assert!(
+            o.iter()
+                .any(|x| x.kind == OffenseKind::IncludeVsCoverOnRange)
+        );
     }
 
     #[test]
@@ -786,16 +813,18 @@ mod tests {
     #[test]
     fn each_with_index_without_block_still_fires() {
         let o = parse_and_collect(b"arr.each_with_index");
-        assert!(o
-            .iter()
-            .any(|x| x.kind == OffenseKind::EachWithIndexVsWhile));
+        assert!(
+            o.iter()
+                .any(|x| x.kind == OffenseKind::EachWithIndexVsWhile)
+        );
     }
 
     #[test]
     fn fetch_with_block_pass_no_fire() {
         let o = parse_and_collect(b"h.fetch(:key, &block)");
-        assert!(!o
-            .iter()
-            .any(|x| x.kind == OffenseKind::FetchWithArgumentVsBlock));
+        assert!(
+            !o.iter()
+                .any(|x| x.kind == OffenseKind::FetchWithArgumentVsBlock)
+        );
     }
 }

@@ -260,9 +260,11 @@ mod tests {
         std::fs::write(&file, "def foo\n  for x in [1,2]; puts x; end\nend\n").unwrap();
         let config = crate::config::Config::default();
         let result = super::analyze_file(&file, &config).unwrap();
-        assert!(result
-            .offenses
-            .iter()
-            .any(|o| o.kind == crate::offense::OffenseKind::ForLoopVsEach));
+        assert!(
+            result
+                .offenses
+                .iter()
+                .any(|o| o.kind == crate::offense::OffenseKind::ForLoopVsEach)
+        );
     }
 }

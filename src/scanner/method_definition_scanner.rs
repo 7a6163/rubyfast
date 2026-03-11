@@ -1,5 +1,5 @@
-use lib_ruby_parser::nodes::Def;
 use lib_ruby_parser::Node;
+use lib_ruby_parser::nodes::Def;
 
 use crate::ast_helpers::{
     body_expressions, def_block_arg_name, def_first_arg_name, def_regular_arg_count,
@@ -42,10 +42,11 @@ fn body_contains_block_call(body: &Option<Box<Node>>, block_name: &str) -> bool 
 fn node_contains_block_call(node: &Node, block_name: &str) -> bool {
     if let Node::Send(s) = node
         && s.method_name == "call"
-            && let Some(Node::Lvar(lv)) = s.recv.as_deref()
-                && lv.name == block_name {
-                    return true;
-                }
+        && let Some(Node::Lvar(lv)) = s.recv.as_deref()
+        && lv.name == block_name
+    {
+        return true;
+    }
     let mut found = false;
     crate::ast_helpers::for_each_child(node, |child| {
         if !found && node_contains_block_call(child, block_name) {
@@ -108,12 +109,13 @@ fn check_setter_vs_attr_writer(def: &Def, offenses: &mut Vec<Offense>) {
         }
         // The assigned value must be the argument
         if let Some(Node::Lvar(lv)) = ia.value.as_deref()
-            && lv.name == arg_name {
-                offenses.push(Offense::new(
-                    OffenseKind::SetterVsAttrWriter,
-                    def.keyword_l.begin,
-                ));
-            }
+            && lv.name == arg_name
+        {
+            offenses.push(Offense::new(
+                OffenseKind::SetterVsAttrWriter,
+                def.keyword_l.begin,
+            ));
+        }
     }
 }
 
@@ -144,129 +146,161 @@ mod tests {
     #[test]
     fn getter_fires() {
         let offenses = parse_and_scan(b"def name; @name; end");
-        assert!(offenses
-            .iter()
-            .any(|o| o.kind == OffenseKind::GetterVsAttrReader));
+        assert!(
+            offenses
+                .iter()
+                .any(|o| o.kind == OffenseKind::GetterVsAttrReader)
+        );
     }
 
     #[test]
     fn getter_with_assignment_does_not_fire() {
         let offenses = parse_and_scan(b"def name; @name = 1; end");
-        assert!(!offenses
-            .iter()
-            .any(|o| o.kind == OffenseKind::GetterVsAttrReader));
+        assert!(
+            !offenses
+                .iter()
+                .any(|o| o.kind == OffenseKind::GetterVsAttrReader)
+        );
     }
 
     #[test]
     fn setter_fires() {
         let offenses = parse_and_scan(b"def name=(value); @name = value; end");
-        assert!(offenses
-            .iter()
-            .any(|o| o.kind == OffenseKind::SetterVsAttrWriter));
+        assert!(
+            offenses
+                .iter()
+                .any(|o| o.kind == OffenseKind::SetterVsAttrWriter)
+        );
     }
 
     #[test]
     fn proc_call_fires() {
         let offenses = parse_and_scan(b"def foo(&block); block.call; end");
-        assert!(offenses
-            .iter()
-            .any(|o| o.kind == OffenseKind::ProcCallVsYield));
+        assert!(
+            offenses
+                .iter()
+                .any(|o| o.kind == OffenseKind::ProcCallVsYield)
+        );
     }
 
     #[test]
     fn no_block_arg_no_proc_call() {
         let offenses = parse_and_scan(b"def foo; block.call; end");
-        assert!(!offenses
-            .iter()
-            .any(|o| o.kind == OffenseKind::ProcCallVsYield));
+        assert!(
+            !offenses
+                .iter()
+                .any(|o| o.kind == OffenseKind::ProcCallVsYield)
+        );
     }
 
     #[test]
     fn setter_wrong_ivar_name_no_fire() {
         let offenses = parse_and_scan(b"def name=(v); @other = v; end");
-        assert!(!offenses
-            .iter()
-            .any(|o| o.kind == OffenseKind::SetterVsAttrWriter));
+        assert!(
+            !offenses
+                .iter()
+                .any(|o| o.kind == OffenseKind::SetterVsAttrWriter)
+        );
     }
 
     #[test]
     fn setter_wrong_value_no_fire() {
         let offenses = parse_and_scan(b"def name=(v); @name = 42; end");
-        assert!(!offenses
-            .iter()
-            .any(|o| o.kind == OffenseKind::SetterVsAttrWriter));
+        assert!(
+            !offenses
+                .iter()
+                .any(|o| o.kind == OffenseKind::SetterVsAttrWriter)
+        );
     }
 
     #[test]
     fn setter_multiple_args_no_fire() {
         let offenses = parse_and_scan(b"def name=(a, b); @name = a; end");
-        assert!(!offenses
-            .iter()
-            .any(|o| o.kind == OffenseKind::SetterVsAttrWriter));
+        assert!(
+            !offenses
+                .iter()
+                .any(|o| o.kind == OffenseKind::SetterVsAttrWriter)
+        );
     }
 
     #[test]
     fn setter_no_body_no_fire() {
         let offenses = parse_and_scan(b"def name=(v); end");
-        assert!(!offenses
-            .iter()
-            .any(|o| o.kind == OffenseKind::SetterVsAttrWriter));
+        assert!(
+            !offenses
+                .iter()
+                .any(|o| o.kind == OffenseKind::SetterVsAttrWriter)
+        );
     }
 
     #[test]
     fn getter_with_args_no_fire() {
         let offenses = parse_and_scan(b"def name(x); @name; end");
-        assert!(!offenses
-            .iter()
-            .any(|o| o.kind == OffenseKind::GetterVsAttrReader));
+        assert!(
+            !offenses
+                .iter()
+                .any(|o| o.kind == OffenseKind::GetterVsAttrReader)
+        );
     }
 
     #[test]
     fn getter_multiple_body_stmts_no_fire() {
         let offenses = parse_and_scan(b"def name; puts 'x'; @name; end");
-        assert!(!offenses
-            .iter()
-            .any(|o| o.kind == OffenseKind::GetterVsAttrReader));
+        assert!(
+            !offenses
+                .iter()
+                .any(|o| o.kind == OffenseKind::GetterVsAttrReader)
+        );
     }
 
     #[test]
     fn getter_wrong_ivar_no_fire() {
         let offenses = parse_and_scan(b"def name; @other; end");
-        assert!(!offenses
-            .iter()
-            .any(|o| o.kind == OffenseKind::GetterVsAttrReader));
+        assert!(
+            !offenses
+                .iter()
+                .any(|o| o.kind == OffenseKind::GetterVsAttrReader)
+        );
     }
 
     #[test]
     fn getter_no_body_no_fire() {
         let offenses = parse_and_scan(b"def name; end");
-        assert!(!offenses
-            .iter()
-            .any(|o| o.kind == OffenseKind::GetterVsAttrReader));
+        assert!(
+            !offenses
+                .iter()
+                .any(|o| o.kind == OffenseKind::GetterVsAttrReader)
+        );
     }
 
     #[test]
     fn proc_call_nested_in_body() {
         let offenses = parse_and_scan(b"def foo(&block); if true; block.call; end; end");
-        assert!(offenses
-            .iter()
-            .any(|o| o.kind == OffenseKind::ProcCallVsYield));
+        assert!(
+            offenses
+                .iter()
+                .any(|o| o.kind == OffenseKind::ProcCallVsYield)
+        );
     }
 
     #[test]
     fn setter_name_method_is_not_getter() {
         // name= should not trigger getter check
         let offenses = parse_and_scan(b"def name=(v); @name = v; end");
-        assert!(!offenses
-            .iter()
-            .any(|o| o.kind == OffenseKind::GetterVsAttrReader));
+        assert!(
+            !offenses
+                .iter()
+                .any(|o| o.kind == OffenseKind::GetterVsAttrReader)
+        );
     }
 
     #[test]
     fn setter_body_not_ivasgn_no_fire() {
         let offenses = parse_and_scan(b"def name=(v); puts v; end");
-        assert!(!offenses
-            .iter()
-            .any(|o| o.kind == OffenseKind::SetterVsAttrWriter));
+        assert!(
+            !offenses
+                .iter()
+                .any(|o| o.kind == OffenseKind::SetterVsAttrWriter)
+        );
     }
 }

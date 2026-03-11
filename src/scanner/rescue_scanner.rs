@@ -1,5 +1,5 @@
-use lib_ruby_parser::nodes::RescueBody;
 use lib_ruby_parser::Node;
+use lib_ruby_parser::nodes::RescueBody;
 
 use crate::offense::{Offense, OffenseKind};
 

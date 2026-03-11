@@ -65,15 +65,15 @@ impl OffenseKind {
             }
             Self::KeysEachVsEachKey => "Hash#keys.each is slower than Hash#each_key",
             Self::MapFlattenVsFlatMap => "Array#map.flatten(1) is slower than Array#flat_map",
-            Self::GsubVsTr => "Use String#tr instead of String#gsub for single-character replacement",
+            Self::GsubVsTr => {
+                "Use String#tr instead of String#gsub for single-character replacement"
+            }
             Self::SortVsSortBy => "Enumerable#sort is slower than Enumerable#sort_by",
             Self::FetchWithArgumentVsBlock => {
                 "Hash#fetch with second argument is slower than Hash#fetch with block"
             }
             Self::HashMergeBangVsHashBrackets => "Hash#merge! is slower than Hash#[]",
-            Self::BlockVsSymbolToProc => {
-                "Use symbol-to-proc (&:method) instead of block"
-            }
+            Self::BlockVsSymbolToProc => "Use symbol-to-proc (&:method) instead of block",
             Self::EachWithIndexVsWhile => "Using each_with_index is slower than while loop",
             Self::IncludeVsCoverOnRange => "Use #cover? instead of #include? on ranges",
             Self::ModuleEval => "Using module_eval is slower than define_method",

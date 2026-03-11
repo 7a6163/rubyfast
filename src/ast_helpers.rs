@@ -1,5 +1,5 @@
-use lib_ruby_parser::nodes::*;
 use lib_ruby_parser::Node;
+use lib_ruby_parser::nodes::*;
 
 /// Convert a byte offset to a 1-based line number using pre-computed newline positions.
 pub fn byte_offset_to_line(newline_positions: &[usize], byte_offset: usize) -> usize {
