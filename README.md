@@ -46,11 +46,11 @@ Groups offenses by file path — compact and easy to scan:
 
 ```
 app/controllers/concerns/lottery_common.rb
-  L13  fetch_with_argument_vs_block
-  L94  fetch_with_argument_vs_block
+  L13  Hash#fetch with second argument is slower than Hash#fetch with block [fetch_with_argument_vs_block]
+  L94  Hash#fetch with second argument is slower than Hash#fetch with block [fetch_with_argument_vs_block]
 
 app/controllers/api/v1/health_articles_controller.rb
-  L11  fetch_with_argument_vs_block
+  L11  Hash#fetch with second argument is slower than Hash#fetch with block [fetch_with_argument_vs_block]
 ```
 
 ### `--format rule`
