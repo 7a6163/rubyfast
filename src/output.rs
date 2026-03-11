@@ -26,8 +26,10 @@ pub fn print_results(result: &TraversalResult, format: &OutputFormat) {
 ///
 /// ```text
 /// app/controllers/concerns/lottery_common.rb
-///   L13  Hash#fetch with second argument is slower than Hash#fetch with block [fetch_with_argument_vs_block]
-///   L94  Hash#fetch with second argument is slower than Hash#fetch with block [fetch_with_argument_vs_block]
+///   L13  Hash#fetch with second argument is slower than Hash#fetch with block
+///
+/// tests/fixtures/19_for_loop.rb
+///   L1   For loop is slower than using each (fixable)
 /// ```
 fn print_results_by_file(result: &TraversalResult) {
     for analysis in &result.results {
@@ -36,11 +38,16 @@ fn print_results_by_file(result: &TraversalResult) {
         }
         println!("{}", analysis.path.bold());
         for offense in &analysis.offenses {
+            let fixable_tag = if offense.kind.is_fixable() {
+                format!(" {}", "(fixable)".green())
+            } else {
+                String::new()
+            };
             println!(
-                "  {}  {} [{}]",
+                "  {}  {}{}",
                 format!("L{}", offense.line).cyan(),
                 offense.kind.explanation(),
-                offense.kind.config_key().dimmed()
+                fixable_tag
             );
         }
         println!();

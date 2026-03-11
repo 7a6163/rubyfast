@@ -4,8 +4,9 @@
 
 ### Changed
 
-- Default `--format file` output now shows human-readable explanation with config key in brackets:
-  `L73  Hash#fetch with second argument is slower than Hash#fetch with block [fetch_with_argument_vs_block]`
+- Default `--format file` output now shows human-readable explanation instead of config key
+- Offenses that support `--fix` are tagged with `(fixable)` in output
+- Shortened verbose explanation messages for readability
 - Performance: use `HashSet` instead of `Vec` for file exclusion lookup (O(1) vs O(n))
 
 ### Internal

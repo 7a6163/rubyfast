@@ -63,25 +63,16 @@ impl OffenseKind {
             Self::ReverseEachVsReverseEach => {
                 "Array#reverse.each is slower than Array#reverse_each"
             }
-            Self::KeysEachVsEachKey => {
-                "Hash#keys.each is slower than Hash#each_key. \
-                 N.B. Hash#each_key cannot be used if the hash is modified during the each block"
-            }
+            Self::KeysEachVsEachKey => "Hash#keys.each is slower than Hash#each_key",
             Self::MapFlattenVsFlatMap => "Array#map.flatten(1) is slower than Array#flat_map",
-            Self::GsubVsTr => {
-                "Using tr is faster than gsub when replacing a single character \
-                 in a string with another single character"
-            }
+            Self::GsubVsTr => "Use String#tr instead of String#gsub for single-character replacement",
             Self::SortVsSortBy => "Enumerable#sort is slower than Enumerable#sort_by",
             Self::FetchWithArgumentVsBlock => {
                 "Hash#fetch with second argument is slower than Hash#fetch with block"
             }
-            Self::HashMergeBangVsHashBrackets => {
-                "Hash#merge! with one argument is slower than Hash#[]"
-            }
+            Self::HashMergeBangVsHashBrackets => "Hash#merge! is slower than Hash#[]",
             Self::BlockVsSymbolToProc => {
-                "Calling argumentless methods within blocks is slower than \
-                 using symbol to proc"
+                "Use symbol-to-proc (&:method) instead of block"
             }
             Self::EachWithIndexVsWhile => "Using each_with_index is slower than while loop",
             Self::IncludeVsCoverOnRange => "Use #cover? instead of #include? on ranges",
@@ -92,6 +83,21 @@ impl OffenseKind {
             Self::SetterVsAttrWriter => "Use attr_writer for writing to ivars",
             Self::ForLoopVsEach => "For loop is slower than using each",
         }
+    }
+
+    /// Whether this offense kind supports auto-fix via `--fix`.
+    pub fn is_fixable(self) -> bool {
+        matches!(
+            self,
+            Self::ShuffleFirstVsSample
+                | Self::SelectFirstVsDetect
+                | Self::ReverseEachVsReverseEach
+                | Self::KeysEachVsEachKey
+                | Self::MapFlattenVsFlatMap
+                | Self::GsubVsTr
+                | Self::IncludeVsCoverOnRange
+                | Self::ForLoopVsEach
+        )
     }
 
     /// All offense kinds, for iteration.

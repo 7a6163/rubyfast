@@ -46,11 +46,18 @@ Groups offenses by file path — compact and easy to scan:
 
 ```
 app/controllers/concerns/lottery_common.rb
-  L13  Hash#fetch with second argument is slower than Hash#fetch with block [fetch_with_argument_vs_block]
-  L94  Hash#fetch with second argument is slower than Hash#fetch with block [fetch_with_argument_vs_block]
+  L13  Hash#fetch with second argument is slower than Hash#fetch with block
+  L94  Hash#fetch with second argument is slower than Hash#fetch with block
 
 app/controllers/api/v1/health_articles_controller.rb
-  L11  Hash#fetch with second argument is slower than Hash#fetch with block [fetch_with_argument_vs_block]
+  L11  Hash#fetch with second argument is slower than Hash#fetch with block
+```
+
+Offenses that support `--fix` are tagged with `(fixable)`:
+
+```
+tests/fixtures/19_for_loop.rb
+  L1  For loop is slower than using each (fixable)
 ```
 
 ### `--format rule`
