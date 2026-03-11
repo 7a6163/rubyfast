@@ -26,8 +26,8 @@ pub fn print_results(result: &TraversalResult, format: &OutputFormat) {
 ///
 /// ```text
 /// app/controllers/concerns/lottery_common.rb
-///   L13  fetch_with_argument_vs_block
-///   L94  fetch_with_argument_vs_block
+///   L13  Hash#fetch with second argument is slower than Hash#fetch with block [fetch_with_argument_vs_block]
+///   L94  Hash#fetch with second argument is slower than Hash#fetch with block [fetch_with_argument_vs_block]
 /// ```
 fn print_results_by_file(result: &TraversalResult) {
     for analysis in &result.results {
@@ -37,9 +37,10 @@ fn print_results_by_file(result: &TraversalResult) {
         println!("{}", analysis.path.bold());
         for offense in &analysis.offenses {
             println!(
-                "  {}  {}",
+                "  {}  {} [{}]",
                 format!("L{}", offense.line).cyan(),
-                offense.kind.config_key()
+                offense.kind.explanation(),
+                offense.kind.config_key().dimmed()
             );
         }
         println!();
