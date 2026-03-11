@@ -237,7 +237,7 @@ mod tests {
         let newline_positions: Vec<usize> = bytes
             .iter()
             .enumerate()
-            .filter(|(_, &b)| b == b'\n')
+            .filter(|&(_, &b)| b == b'\n')
             .map(|(i, _)| i)
             .collect();
         build_disabled_set(&result.comments, &bytes, &newline_positions)

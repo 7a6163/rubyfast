@@ -184,8 +184,8 @@ fn check_keys_each(send: &Send, offenses: &mut Vec<Offense>) {
     if send.method_name != "each" {
         return;
     }
-    if let Some(recv_send) = receiver_as_send(&send.recv) {
-        if recv_send.method_name == "keys" && recv_send.args.is_empty() {
+    if let Some(recv_send) = receiver_as_send(&send.recv)
+        && recv_send.method_name == "keys" && recv_send.args.is_empty() {
             let offense = match (recv_send.dot_l.as_ref(), send.selector_l.as_ref()) {
                 (Some(dot_l), Some(sel_l)) => {
                     let fix = Fix::single(dot_l.begin, sel_l.end, ".each_key");
@@ -195,7 +195,6 @@ fn check_keys_each(send: &Send, offenses: &mut Vec<Offense>) {
             };
             offenses.push(offense);
         }
-    }
 }
 
 /// `.select{}.first` → `.detect{}` (when receiver is a plain Send, not Block)
@@ -203,8 +202,8 @@ fn check_select_first(send: &Send, offenses: &mut Vec<Offense>) {
     if send.method_name != "first" || arg_count_without_block_pass(&send.args) != 0 {
         return;
     }
-    if let Some(recv_send) = receiver_as_send(&send.recv) {
-        if recv_send.method_name == "select" && has_block_pass(&recv_send.args) {
+    if let Some(recv_send) = receiver_as_send(&send.recv)
+        && recv_send.method_name == "select" && has_block_pass(&recv_send.args) {
             let offense = match (recv_send.selector_l.as_ref(), send.dot_l.as_ref()) {
                 (Some(sel_l), Some(dot_l)) => {
                     let fix = Fix::two(
@@ -225,7 +224,6 @@ fn check_select_first(send: &Send, offenses: &mut Vec<Offense>) {
             };
             offenses.push(offense);
         }
-    }
 }
 
 /// `.select{}.last` → `.reverse.detect{}` (when receiver is a plain Send)
@@ -233,14 +231,13 @@ fn check_select_last(send: &Send, offenses: &mut Vec<Offense>) {
     if send.method_name != "last" || arg_count_without_block_pass(&send.args) != 0 {
         return;
     }
-    if let Some(recv_send) = receiver_as_send(&send.recv) {
-        if recv_send.method_name == "select" && has_block_pass(&recv_send.args) {
+    if let Some(recv_send) = receiver_as_send(&send.recv)
+        && recv_send.method_name == "select" && has_block_pass(&recv_send.args) {
             offenses.push(Offense::new(
                 OffenseKind::SelectLastVsReverseDetect,
                 send.expression_l.begin,
             ));
         }
-    }
 }
 
 /// `.map{}.flatten(1)` → `.flat_map{}` (when receiver is a plain Send)
@@ -343,14 +340,13 @@ fn check_module_eval_send(send: &Send, offenses: &mut Vec<Offense>) {
     if send.method_name != "module_eval" {
         return;
     }
-    if let Some(first_arg) = send.args.first() {
-        if str_contains_def(first_arg) {
+    if let Some(first_arg) = send.args.first()
+        && str_contains_def(first_arg) {
             offenses.push(Offense::new(
                 OffenseKind::ModuleEval,
                 send.expression_l.begin,
             ));
         }
-    }
 }
 
 /// `.map { |x| x.foo }` → `.map(&:foo)`
@@ -400,14 +396,13 @@ fn check_block_vs_symbol_to_proc(send: &Send, block: &Block, offenses: &mut Vec<
     }
 
     // Receiver must be an Lvar matching the block argument name
-    if let Node::Lvar(lv) = receiver {
-        if lv.name == *block_arg_name {
+    if let Node::Lvar(lv) = receiver
+        && lv.name == *block_arg_name {
             offenses.push(Offense::new(
                 OffenseKind::BlockVsSymbolToProc,
                 send.expression_l.begin,
             ));
         }
-    }
 }
 
 #[cfg(test)]

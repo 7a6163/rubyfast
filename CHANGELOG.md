@@ -1,12 +1,18 @@
 # Changelog
 
+## [1.2.1] - 2026-03-11
+
+### Changed
+
+- Offenses that support `--fix` are now tagged with `(fixable)` in output
+- Shortened verbose explanation messages for better readability
+- Updated benchmark results (17,091 Ruby files: 3.4s vs 150s)
+
 ## [1.2.0] - 2026-03-11
 
 ### Changed
 
 - Default `--format file` output now shows human-readable explanation instead of config key
-- Offenses that support `--fix` are tagged with `(fixable)` in output
-- Shortened verbose explanation messages for readability
 - Performance: use `HashSet` instead of `Vec` for file exclusion lookup (O(1) vs O(n))
 
 ### Internal

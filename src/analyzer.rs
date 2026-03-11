@@ -35,7 +35,7 @@ pub fn analyze_file(path: &Path, config: &Config) -> Result<AnalysisResult, Pars
     let newline_positions: Vec<usize> = source
         .iter()
         .enumerate()
-        .filter(|(_, &b)| b == b'\n')
+        .filter(|&(_, &b)| b == b'\n')
         .map(|(i, _)| i)
         .collect();
 
@@ -158,7 +158,7 @@ mod tests {
         source
             .iter()
             .enumerate()
-            .filter(|(_, &b)| b == b'\n')
+            .filter(|&(_, &b)| b == b'\n')
             .map(|(i, _)| i)
             .collect()
     }

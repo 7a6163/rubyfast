@@ -40,15 +40,12 @@ fn body_contains_block_call(body: &Option<Box<Node>>, block_name: &str) -> bool 
 }
 
 fn node_contains_block_call(node: &Node, block_name: &str) -> bool {
-    if let Node::Send(s) = node {
-        if s.method_name == "call" {
-            if let Some(Node::Lvar(lv)) = s.recv.as_deref() {
-                if lv.name == block_name {
+    if let Node::Send(s) = node
+        && s.method_name == "call"
+            && let Some(Node::Lvar(lv)) = s.recv.as_deref()
+                && lv.name == block_name {
                     return true;
                 }
-            }
-        }
-    }
     let mut found = false;
     crate::ast_helpers::for_each_child(node, |child| {
         if !found && node_contains_block_call(child, block_name) {
@@ -110,14 +107,13 @@ fn check_setter_vs_attr_writer(def: &Def, offenses: &mut Vec<Offense>) {
             return;
         }
         // The assigned value must be the argument
-        if let Some(Node::Lvar(lv)) = ia.value.as_deref() {
-            if lv.name == arg_name {
+        if let Some(Node::Lvar(lv)) = ia.value.as_deref()
+            && lv.name == arg_name {
                 offenses.push(Offense::new(
                     OffenseKind::SetterVsAttrWriter,
                     def.keyword_l.begin,
                 ));
             }
-        }
     }
 }
 
