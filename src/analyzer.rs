@@ -257,11 +257,7 @@ mod tests {
     fn walk_node_nested_for_inside_method() {
         let dir = tempfile::TempDir::new().unwrap();
         let file = dir.path().join("test.rb");
-        std::fs::write(
-            &file,
-            "def foo\n  for x in [1,2]; puts x; end\nend\n",
-        )
-        .unwrap();
+        std::fs::write(&file, "def foo\n  for x in [1,2]; puts x; end\nend\n").unwrap();
         let config = crate::config::Config::default();
         let result = super::analyze_file(&file, &config).unwrap();
         assert!(result

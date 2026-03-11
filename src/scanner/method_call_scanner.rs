@@ -630,9 +630,7 @@ mod tests {
     #[test]
     fn select_first_with_block_pass() {
         let o = parse_and_collect(b"arr.select(&:odd?).first");
-        assert!(o
-            .iter()
-            .any(|x| x.kind == OffenseKind::SelectFirstVsDetect));
+        assert!(o.iter().any(|x| x.kind == OffenseKind::SelectFirstVsDetect));
     }
 
     #[test]
@@ -646,17 +644,13 @@ mod tests {
     #[test]
     fn map_flatten_with_arg_2_no_fire() {
         let o = parse_and_collect(b"arr.map { |e| [e] }.flatten(2)");
-        assert!(!o
-            .iter()
-            .any(|x| x.kind == OffenseKind::MapFlattenVsFlatMap));
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::MapFlattenVsFlatMap));
     }
 
     #[test]
     fn select_first_with_args_no_fire() {
         let o = parse_and_collect(b"arr.select { |x| x > 1 }.first(3)");
-        assert!(!o
-            .iter()
-            .any(|x| x.kind == OffenseKind::SelectFirstVsDetect));
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::SelectFirstVsDetect));
     }
 
     #[test]
@@ -694,34 +688,26 @@ mod tests {
     #[test]
     fn block_multiple_args_no_symbol_to_proc() {
         let o = parse_and_collect(b"arr.each_with_object([]) { |x, acc| x.to_s }");
-        assert!(!o
-            .iter()
-            .any(|x| x.kind == OffenseKind::BlockVsSymbolToProc));
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::BlockVsSymbolToProc));
     }
 
     #[test]
     fn block_no_body_no_symbol_to_proc() {
         // Empty block body
         let o = parse_and_collect(b"arr.map { |x| }");
-        assert!(!o
-            .iter()
-            .any(|x| x.kind == OffenseKind::BlockVsSymbolToProc));
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::BlockVsSymbolToProc));
     }
 
     #[test]
     fn block_receiver_not_lvar_no_symbol_to_proc() {
         let o = parse_and_collect(b"arr.map { |x| @y.to_s }");
-        assert!(!o
-            .iter()
-            .any(|x| x.kind == OffenseKind::BlockVsSymbolToProc));
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::BlockVsSymbolToProc));
     }
 
     #[test]
     fn block_receiver_is_primitive_no_symbol_to_proc() {
         let o = parse_and_collect(b"arr.map { |x| 42.to_s }");
-        assert!(!o
-            .iter()
-            .any(|x| x.kind == OffenseKind::BlockVsSymbolToProc));
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::BlockVsSymbolToProc));
     }
 
     #[test]
@@ -780,24 +766,18 @@ mod tests {
     #[test]
     fn block_wrong_lvar_name_no_symbol_to_proc() {
         let o = parse_and_collect(b"arr.map { |x| y.to_s }");
-        assert!(!o
-            .iter()
-            .any(|x| x.kind == OffenseKind::BlockVsSymbolToProc));
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::BlockVsSymbolToProc));
     }
 
     #[test]
     fn block_with_args_on_outer_no_symbol_to_proc() {
         let o = parse_and_collect(b"arr.inject(0) { |x| x.to_s }");
-        assert!(!o
-            .iter()
-            .any(|x| x.kind == OffenseKind::BlockVsSymbolToProc));
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::BlockVsSymbolToProc));
     }
 
     #[test]
     fn module_eval_with_heredoc_containing_def() {
-        let o = parse_and_collect(
-            b"klass.module_eval(<<~RUBY)\n  def foo\n    42\n  end\nRUBY\n",
-        );
+        let o = parse_and_collect(b"klass.module_eval(<<~RUBY)\n  def foo\n    42\n  end\nRUBY\n");
         assert!(o.iter().any(|x| x.kind == OffenseKind::ModuleEval));
     }
 

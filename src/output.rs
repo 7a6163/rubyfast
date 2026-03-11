@@ -307,10 +307,7 @@ mod tests {
         let result = make_result(offenses);
         let filtered = filter_unfixable(&result);
         assert_eq!(filtered.results[0].offenses.len(), 2);
-        assert!(filtered.results[0]
-            .offenses
-            .iter()
-            .all(|o| o.fix.is_none()));
+        assert!(filtered.results[0].offenses.iter().all(|o| o.fix.is_none()));
     }
 
     #[test]

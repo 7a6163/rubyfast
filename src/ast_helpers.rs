@@ -678,7 +678,11 @@ mod tests {
         for source in sources {
             if let Some(ast) = parse(source) {
                 let total = count_all_nodes(&ast);
-                assert!(total > 0, "No nodes in AST for {:?}", std::str::from_utf8(source));
+                assert!(
+                    total > 0,
+                    "No nodes in AST for {:?}",
+                    std::str::from_utf8(source)
+                );
             }
         }
     }
@@ -728,19 +732,24 @@ mod tests {
     fn visit_children_leaf_nodes() {
         // Leaf nodes should have 0 children
         let leaf_sources: &[&[u8]] = &[
-            b"42",          // Int
-            b"3.14",        // Float
-            b"'s'",         // Str
-            b":sym",        // Sym
-            b"true",        // True
-            b"false",       // False
-            b"nil",         // Nil
-            b"x",           // Lvar
+            b"42",    // Int
+            b"3.14",  // Float
+            b"'s'",   // Str
+            b":sym",  // Sym
+            b"true",  // True
+            b"false", // False
+            b"nil",   // Nil
+            b"x",     // Lvar
         ];
 
         for source in leaf_sources {
             let ast = parse(source).unwrap();
-            assert_eq!(count_children(&ast), 0, "Expected 0 children for {:?}", std::str::from_utf8(source));
+            assert_eq!(
+                count_children(&ast),
+                0,
+                "Expected 0 children for {:?}",
+                std::str::from_utf8(source)
+            );
         }
     }
 }
