@@ -214,21 +214,21 @@ docker run --rm -v $(pwd):/workspace ghcr.io/7a6163/rubyfast:latest .
 
 Compared against the original [fasterer](https://github.com/DamirSvrtan/fasterer) Ruby gem (v0.11.0) using [hyperfine](https://github.com/sharkdp/hyperfine). Measured on Apple Silicon, macOS.
 
-### Large project: Discourse (9,055 Ruby files)
+### Large project (17,091 Ruby files)
 
 | Command | Mean | Min | Max | Relative |
 |:---|---:|---:|---:|---:|
-| `rubyfast` | 585.7 ms | 557.6 ms | 624.4 ms | **1.00** |
-| `fasterer` | 58,218.0 ms | 55,535.9 ms | 65,065.4 ms | 99.40x slower |
+| `rubyfast` | 3,445 ms | 3,421 ms | 3,464 ms | **1.00** |
+| `fasterer` | 150,122 ms | 148,309 ms | 151,609 ms | 43.57x slower |
 
-### Small project: 21 test fixtures
+### Small project: 22 test fixtures
 
 | Command | Mean | Min | Max | Relative |
 |:---|---:|---:|---:|---:|
-| `rubyfast` | 4.8 ms | 3.2 ms | 71.5 ms | **1.00** |
-| `fasterer` | 353.7 ms | 347.1 ms | 366.2 ms | 73.21x slower |
+| `rubyfast` | 4.6 ms | 3.3 ms | 15.1 ms | **1.00** |
+| `fasterer` | 488.7 ms | 483.1 ms | 510.7 ms | 105.57x slower |
 
-**~100x faster** on real-world codebases. The Rust implementation processes 9,000+ Ruby files in under a second, while the Ruby gem takes nearly a minute.
+**~44–106x faster** on real-world codebases. The Rust implementation processes 17,000+ Ruby files in 3.4 seconds, while the Ruby gem takes over 2.5 minutes.
 
 ## Development
 
