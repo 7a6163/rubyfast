@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.1] - 2026-03-11
+
+### Changed
+
+- Upgrade `codecov/codecov-action` from v4 to v5 with `fail_ci_if_error`
+- Add crates.io publish step to release workflow
+- Add CI, Codecov, Crates.io, and License badges to README
+
 ## [1.1.0] - 2026-03-03
 
 ### Added
