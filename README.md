@@ -53,11 +53,13 @@ app/controllers/api/v1/health_articles_controller.rb
   L11  Hash#fetch with second argument is slower than Hash#fetch with block
 ```
 
-Offenses that support `--fix` are tagged with `(fixable)`:
+Offenses that support `--fix` are tagged with `(fixable)`, and the summary line shows how many can be auto-fixed:
 
 ```
 tests/fixtures/19_for_loop.rb
   L1  For loop is slower than using each (fixable)
+
+22 files inspected, 41 offenses detected, 21 offenses autocorrectable (run rubyfast --fix)
 ```
 
 ### `--format rule`

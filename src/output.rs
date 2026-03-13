@@ -168,7 +168,12 @@ fn print_statistics(result: &TraversalResult) {
             fixable_hint
         );
     } else {
-        println!("{}, {}{}", files_str.green(), colored_offenses, fixable_hint);
+        println!(
+            "{}, {}{}",
+            files_str.green(),
+            colored_offenses,
+            fixable_hint
+        );
     }
 }
 
