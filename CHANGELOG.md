@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.3] - 2026-03-13
+
+### Added
+
+- Summary line now shows autocorrectable count when fixable offenses are detected:
+  `22 files inspected, 41 offenses detected, 21 offenses autocorrectable (run rubyfast --fix)`
+- CI: `cargo audit` security check for dependency vulnerabilities
+
 ## [1.2.2] - 2026-03-11
 
 ### Changed

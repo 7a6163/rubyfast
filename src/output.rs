@@ -123,6 +123,12 @@ fn print_statistics(result: &TraversalResult) {
     let files = result.files_inspected;
     let offenses = result.total_offenses();
     let parse_errors = result.parse_errors.len();
+    let fixable: usize = result
+        .results
+        .iter()
+        .flat_map(|r| &r.offenses)
+        .filter(|o| o.kind.is_fixable())
+        .count();
 
     let files_str = format!("{} {} inspected", files, pluralize("file", files));
 
@@ -134,6 +140,20 @@ fn print_statistics(result: &TraversalResult) {
         offenses_str.red().to_string()
     };
 
+    let fixable_hint = if fixable > 0 {
+        format!(
+            ", {}",
+            format!(
+                "{} {} autocorrectable (run rubyfast --fix)",
+                fixable,
+                pluralize("offense", fixable)
+            )
+            .yellow()
+        )
+    } else {
+        String::new()
+    };
+
     if parse_errors > 0 {
         let errors_str = format!(
             "{} unparsable {} found",
@@ -141,13 +161,19 @@ fn print_statistics(result: &TraversalResult) {
             pluralize("file", parse_errors)
         );
         println!(
-            "{}, {}, {}",
+            "{}, {}, {}{}",
             files_str.green(),
             colored_offenses,
-            errors_str.red()
+            errors_str.red(),
+            fixable_hint
         );
     } else {
-        println!("{}, {}", files_str.green(), colored_offenses);
+        println!(
+            "{}, {}{}",
+            files_str.green(),
+            colored_offenses,
+            fixable_hint
+        );
     }
 }
 
