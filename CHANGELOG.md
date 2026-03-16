@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.3.2] - 2026-03-16
+
+### Fixed
+
+- `apply_fixes` now returns actual replacement count instead of fix object count
+- `is_int_one` handles `0x1`, `0b1`, `0o1` integer literal forms
+
+### Changed
+
+- Replace `serde_yaml` (deprecated) with `serde-saphyr` (YAML 1.2, pure Rust)
+- Use `HashSet` for disabled offenses config (O(1) lookup)
+- Replace `call_args()` Vec allocation with zero-alloc `first_call_arg()` / `call_args_pair()`
+- Replace `body_first_expression` API with safer `body_single_expression`
+- Extract `walk_call_children` to deduplicate CallNode traversal in analyzer
+- Use `std::str::from_utf8` instead of `String::from_utf8_lossy` in comment directives
+- Extract shared `leak_parse` / `parse_first_stmt` test helpers
+- Update benchmark: 3-way comparison (rubyfast vs fasterer vs fasterer-prism fork)
+
 ## [1.3.1] - 2026-03-16
 
 ### Fixed
