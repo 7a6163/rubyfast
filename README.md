@@ -214,23 +214,17 @@ docker run --rm -v $(pwd):/workspace ghcr.io/7a6163/rubyfast:latest .
 
 ## Benchmark
 
-Compared against the original [fasterer](https://github.com/DamirSvrtan/fasterer) Ruby gem (v0.11.0) using [hyperfine](https://github.com/sharkdp/hyperfine). Measured on Apple Silicon, macOS.
+Compared against [fasterer](https://github.com/DamirSvrtan/fasterer) (v0.11.0, Ruby + ruby_parser) and [fasterer-prism](https://github.com/mattmenefee/fasterer/tree/native-prism-migration) (v0.12.0, Ruby + prism). Measured on Apple Silicon, macOS.
 
-### Large project (17,091 Ruby files)
+### 2,235 Ruby files
 
-| Command | Mean | Min | Max | Relative |
-|:---|---:|---:|---:|---:|
-| `rubyfast` | 3,445 ms | 3,421 ms | 3,464 ms | **1.00** |
-| `fasterer` | 150,122 ms | 148,309 ms | 151,609 ms | 43.57x slower |
+| Tool | Parser | Time | Relative |
+|:---|:---|---:|---:|
+| **rubyfast v1.3.1** | Rust + ruby-prism | **0.21s** | **1x** |
+| fasterer-prism 0.12.0 | Ruby + prism | 2.09s | 10x slower |
+| fasterer 0.11.0 | Ruby + ruby_parser | 34.1s | 162x slower |
 
-### Small project: 22 test fixtures
-
-| Command | Mean | Min | Max | Relative |
-|:---|---:|---:|---:|---:|
-| `rubyfast` | 4.6 ms | 3.3 ms | 15.1 ms | **1.00** |
-| `fasterer` | 488.7 ms | 483.1 ms | 510.7 ms | 105.57x slower |
-
-**~44–106x faster** on real-world codebases. The Rust implementation processes 17,000+ Ruby files in 3.4 seconds, while the Ruby gem takes over 2.5 minutes.
+**rubyfast is 162x faster** than the original fasterer and **10x faster** than the prism-based Ruby fork.
 
 ## Development
 
