@@ -1,133 +1,124 @@
-use lib_ruby_parser::Node;
-use lib_ruby_parser::nodes::{Block, Send};
-
 use crate::ast_helpers::*;
 use crate::fix::Fix;
 use crate::offense::{Offense, OffenseKind};
 
-/// Scan a method call (Send node) that is NOT inside a Block.
-pub fn scan_send(send: &Send) -> Vec<Offense> {
+/// Scan a method call (CallNode) that does NOT have a block.
+pub fn scan_call(call: &ruby_prism::CallNode<'_>) -> Vec<Offense> {
     let mut offenses = Vec::new();
 
-    check_shuffle_first(send, &mut offenses);
-    check_reverse_each(send, &mut offenses);
-    check_keys_each(send, &mut offenses);
-    check_each_with_index(send, &mut offenses);
-    check_include_vs_cover(send, &mut offenses);
-    check_gsub_vs_tr(send, &mut offenses);
-    check_fetch_with_argument(send, &mut offenses);
-    check_hash_merge_bang(send, &mut offenses);
-    check_map_flatten(send, &mut offenses);
-    check_select_first(send, &mut offenses);
-    check_select_last(send, &mut offenses);
-    check_module_eval_send(send, &mut offenses);
+    check_shuffle_first(call, &mut offenses);
+    check_reverse_each(call, &mut offenses);
+    check_keys_each(call, &mut offenses);
+    check_each_with_index(call, &mut offenses);
+    check_include_vs_cover(call, &mut offenses);
+    check_gsub_vs_tr(call, &mut offenses);
+    check_fetch_with_argument(call, &mut offenses);
+    check_hash_merge_bang(call, &mut offenses);
+    check_map_flatten(call, &mut offenses);
+    check_select_first(call, &mut offenses);
+    check_select_last(call, &mut offenses);
+    check_module_eval_call(call, &mut offenses);
 
     offenses
 }
 
-/// Scan a Block node (method call + block).
-pub fn scan_block(block: &Block) -> Vec<Offense> {
+/// Scan a CallNode that has a BlockNode (method call + block).
+pub fn scan_call_with_block(
+    call: &ruby_prism::CallNode<'_>,
+    block: &ruby_prism::BlockNode<'_>,
+) -> Vec<Offense> {
     let mut offenses = Vec::new();
-
-    let send = match block_call_as_send(block) {
-        Some(s) => s,
-        None => return offenses,
-    };
 
     // Checks that only apply when a block is present
-    check_sort_vs_sort_by(send, &mut offenses);
-    check_module_eval_send(send, &mut offenses);
-    check_block_vs_symbol_to_proc(send, block, &mut offenses);
+    check_sort_vs_sort_by(call, &mut offenses);
+    check_module_eval_call(call, &mut offenses);
+    check_block_vs_symbol_to_proc(call, block, &mut offenses);
 
-    // Chain checks where receiver might be a block call
-    // e.g., .select{}.first — the .first Send wraps the Block
-    // These are actually checked on the outer Send whose receiver is this Block.
-    // But we also run the send-level checks on the call inside the block.
-    check_shuffle_first(send, &mut offenses);
-    check_reverse_each(send, &mut offenses);
-    check_keys_each(send, &mut offenses);
-    check_each_with_index(send, &mut offenses);
-    check_include_vs_cover(send, &mut offenses);
-    check_gsub_vs_tr(send, &mut offenses);
-    // NOTE: check_fetch_with_argument is intentionally excluded here.
-    // If fetch already has a block, the rule doesn't apply.
-    check_hash_merge_bang(send, &mut offenses);
+    // Chain checks on the call inside the block
+    check_shuffle_first(call, &mut offenses);
+    check_reverse_each(call, &mut offenses);
+    check_keys_each(call, &mut offenses);
+    check_each_with_index(call, &mut offenses);
+    check_include_vs_cover(call, &mut offenses);
+    check_gsub_vs_tr(call, &mut offenses);
+    // NOTE: check_fetch_with_argument excluded — if fetch already has a block, rule doesn't apply.
+    check_hash_merge_bang(call, &mut offenses);
 
     offenses
 }
 
-/// Scan a Send whose receiver is a Block node.
-/// This handles chains like `.select { }.first` where .first's receiver is a Block.
-pub fn scan_send_on_block(send: &Send, recv_block: &Block) -> Vec<Offense> {
+/// Scan a CallNode whose receiver is another CallNode that has a block.
+/// This handles chains like `.select { }.first` where .first's receiver is a call-with-block.
+pub fn scan_call_on_block_call(
+    outer: &ruby_prism::CallNode<'_>,
+    recv_call: &ruby_prism::CallNode<'_>,
+) -> Vec<Offense> {
     let mut offenses = Vec::new();
 
-    let recv_send = match block_call_as_send(recv_block) {
-        Some(s) => s,
-        None => return offenses,
-    };
+    let outer_name = outer.name().as_slice();
+    let recv_name = recv_call.name().as_slice();
 
     // .select{}.first → .detect{}
-    if send.method_name == "first"
-        && recv_send.method_name == "select"
-        && arg_count_without_block_pass(&send.args) == 0
-    {
-        let offense = match (recv_send.selector_l.as_ref(), send.dot_l.as_ref()) {
+    if outer_name == b"first" && recv_name == b"select" && arg_count(outer) == 0 {
+        let offense = match (recv_call.message_loc(), outer.call_operator_loc()) {
             (Some(sel_l), Some(dot_l)) => {
                 let fix = Fix::two(
-                    sel_l.begin,
-                    sel_l.end,
+                    sel_l.start_offset(),
+                    sel_l.end_offset(),
                     "detect",
-                    dot_l.begin,
-                    send.expression_l.end,
+                    dot_l.start_offset(),
+                    outer.location().end_offset(),
                     "",
                 );
                 Offense::with_fix(
                     OffenseKind::SelectFirstVsDetect,
-                    send.expression_l.begin,
+                    outer.location().start_offset(),
                     fix,
                 )
             }
-            _ => Offense::new(OffenseKind::SelectFirstVsDetect, send.expression_l.begin),
+            _ => Offense::new(
+                OffenseKind::SelectFirstVsDetect,
+                outer.location().start_offset(),
+            ),
         };
         offenses.push(offense);
     }
 
-    // .select{}.last (no auto-fix — transform to .reverse.detect is too risky)
-    if send.method_name == "last"
-        && recv_send.method_name == "select"
-        && arg_count_without_block_pass(&send.args) == 0
-    {
+    // .select{}.last (no auto-fix)
+    if outer_name == b"last" && recv_name == b"select" && arg_count(outer) == 0 {
         offenses.push(Offense::new(
             OffenseKind::SelectLastVsReverseDetect,
-            send.expression_l.begin,
+            outer.location().start_offset(),
         ));
     }
 
     // .map{}.flatten(1) → .flat_map{}
-    if send.method_name == "flatten"
-        && recv_send.method_name == "map"
-        && send.args.len() == 1
-        && is_int_one(&send.args[0])
-    {
-        let offense = match (recv_send.selector_l.as_ref(), send.dot_l.as_ref()) {
-            (Some(sel_l), Some(dot_l)) => {
-                let fix = Fix::two(
-                    sel_l.begin,
-                    sel_l.end,
-                    "flat_map",
-                    dot_l.begin,
-                    send.expression_l.end,
-                    "",
-                );
-                Offense::with_fix(
+    if outer_name == b"flatten" && recv_name == b"map" {
+        let args = call_args(outer);
+        if args.len() == 1 && is_int_one(&args[0]) {
+            let offense = match (recv_call.message_loc(), outer.call_operator_loc()) {
+                (Some(sel_l), Some(dot_l)) => {
+                    let fix = Fix::two(
+                        sel_l.start_offset(),
+                        sel_l.end_offset(),
+                        "flat_map",
+                        dot_l.start_offset(),
+                        outer.location().end_offset(),
+                        "",
+                    );
+                    Offense::with_fix(
+                        OffenseKind::MapFlattenVsFlatMap,
+                        outer.location().start_offset(),
+                        fix,
+                    )
+                }
+                _ => Offense::new(
                     OffenseKind::MapFlattenVsFlatMap,
-                    send.expression_l.begin,
-                    fix,
-                )
-            }
-            _ => Offense::new(OffenseKind::MapFlattenVsFlatMap, send.expression_l.begin),
-        };
-        offenses.push(offense);
+                    outer.location().start_offset(),
+                ),
+            };
+            offenses.push(offense);
+        }
     }
 
     offenses
@@ -136,279 +127,328 @@ pub fn scan_send_on_block(send: &Send, recv_block: &Block) -> Vec<Offense> {
 // --- Individual offense checks ---
 
 /// `.shuffle.first` → `.sample`
-fn check_shuffle_first(send: &Send, offenses: &mut Vec<Offense>) {
-    if send.method_name != "first" || !receiver_is_send_with_name(&send.recv, "shuffle") {
+fn check_shuffle_first(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offense>) {
+    if call.name().as_slice() != b"first"
+        || !receiver_is_call_with_name(&call.receiver(), b"shuffle")
+    {
         return;
     }
-    let offense = match receiver_as_send(&send.recv).and_then(|rs| rs.dot_l.as_ref()) {
+    let offense = match receiver_as_call(&call.receiver()).and_then(|rs| rs.call_operator_loc()) {
         Some(dot_l) => {
-            let fix = Fix::single(dot_l.begin, send.expression_l.end, ".sample");
+            let fix = Fix::single(
+                dot_l.start_offset(),
+                call.location().end_offset(),
+                ".sample",
+            );
             Offense::with_fix(
                 OffenseKind::ShuffleFirstVsSample,
-                send.expression_l.begin,
+                call.location().start_offset(),
                 fix,
             )
         }
-        None => Offense::new(OffenseKind::ShuffleFirstVsSample, send.expression_l.begin),
+        None => Offense::new(
+            OffenseKind::ShuffleFirstVsSample,
+            call.location().start_offset(),
+        ),
     };
     offenses.push(offense);
 }
 
 /// `.reverse.each` → `.reverse_each`
-fn check_reverse_each(send: &Send, offenses: &mut Vec<Offense>) {
-    if send.method_name != "each" || !receiver_is_send_with_name(&send.recv, "reverse") {
+fn check_reverse_each(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offense>) {
+    if call.name().as_slice() != b"each"
+        || !receiver_is_call_with_name(&call.receiver(), b"reverse")
+    {
         return;
     }
     let offense = match (
-        receiver_as_send(&send.recv).and_then(|rs| rs.dot_l.as_ref()),
-        send.selector_l.as_ref(),
+        receiver_as_call(&call.receiver()).and_then(|rs| rs.call_operator_loc()),
+        call.message_loc(),
     ) {
         (Some(dot_l), Some(sel_l)) => {
-            let fix = Fix::single(dot_l.begin, sel_l.end, ".reverse_each");
+            let fix = Fix::single(dot_l.start_offset(), sel_l.end_offset(), ".reverse_each");
             Offense::with_fix(
                 OffenseKind::ReverseEachVsReverseEach,
-                send.expression_l.begin,
+                call.location().start_offset(),
                 fix,
             )
         }
         _ => Offense::new(
             OffenseKind::ReverseEachVsReverseEach,
-            send.expression_l.begin,
+            call.location().start_offset(),
         ),
     };
     offenses.push(offense);
 }
 
 /// `.keys.each` → `.each_key` (keys must have 0 args)
-fn check_keys_each(send: &Send, offenses: &mut Vec<Offense>) {
-    if send.method_name != "each" {
+fn check_keys_each(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offense>) {
+    if call.name().as_slice() != b"each" {
         return;
     }
-    if let Some(recv_send) = receiver_as_send(&send.recv)
-        && recv_send.method_name == "keys"
-        && recv_send.args.is_empty()
+    if let Some(recv_call) = receiver_as_call(&call.receiver())
+        && recv_call.name().as_slice() == b"keys"
+        && arg_count(&recv_call) == 0
     {
-        let offense = match (recv_send.dot_l.as_ref(), send.selector_l.as_ref()) {
+        let offense = match (recv_call.call_operator_loc(), call.message_loc()) {
             (Some(dot_l), Some(sel_l)) => {
-                let fix = Fix::single(dot_l.begin, sel_l.end, ".each_key");
-                Offense::with_fix(OffenseKind::KeysEachVsEachKey, send.expression_l.begin, fix)
+                let fix = Fix::single(dot_l.start_offset(), sel_l.end_offset(), ".each_key");
+                Offense::with_fix(
+                    OffenseKind::KeysEachVsEachKey,
+                    call.location().start_offset(),
+                    fix,
+                )
             }
-            _ => Offense::new(OffenseKind::KeysEachVsEachKey, send.expression_l.begin),
+            _ => Offense::new(
+                OffenseKind::KeysEachVsEachKey,
+                call.location().start_offset(),
+            ),
         };
         offenses.push(offense);
     }
 }
 
-/// `.select{}.first` → `.detect{}` (when receiver is a plain Send, not Block)
-fn check_select_first(send: &Send, offenses: &mut Vec<Offense>) {
-    if send.method_name != "first" || arg_count_without_block_pass(&send.args) != 0 {
+/// `.select{}.first` → `.detect{}` (when receiver is a plain call with block_pass, not block)
+fn check_select_first(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offense>) {
+    if call.name().as_slice() != b"first" || arg_count(call) != 0 {
         return;
     }
-    if let Some(recv_send) = receiver_as_send(&send.recv)
-        && recv_send.method_name == "select"
-        && has_block_pass(&recv_send.args)
+    if let Some(recv_call) = receiver_as_call(&call.receiver())
+        && recv_call.name().as_slice() == b"select"
+        && has_block_pass(&recv_call)
     {
-        let offense = match (recv_send.selector_l.as_ref(), send.dot_l.as_ref()) {
+        let offense = match (recv_call.message_loc(), call.call_operator_loc()) {
             (Some(sel_l), Some(dot_l)) => {
                 let fix = Fix::two(
-                    sel_l.begin,
-                    sel_l.end,
+                    sel_l.start_offset(),
+                    sel_l.end_offset(),
                     "detect",
-                    dot_l.begin,
-                    send.expression_l.end,
+                    dot_l.start_offset(),
+                    call.location().end_offset(),
                     "",
                 );
                 Offense::with_fix(
                     OffenseKind::SelectFirstVsDetect,
-                    send.expression_l.begin,
+                    call.location().start_offset(),
                     fix,
                 )
             }
-            _ => Offense::new(OffenseKind::SelectFirstVsDetect, send.expression_l.begin),
+            _ => Offense::new(
+                OffenseKind::SelectFirstVsDetect,
+                call.location().start_offset(),
+            ),
         };
         offenses.push(offense);
     }
 }
 
-/// `.select{}.last` → `.reverse.detect{}` (when receiver is a plain Send)
-fn check_select_last(send: &Send, offenses: &mut Vec<Offense>) {
-    if send.method_name != "last" || arg_count_without_block_pass(&send.args) != 0 {
+/// `.select{}.last` → `.reverse.detect{}` (when receiver is a plain call with block_pass)
+fn check_select_last(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offense>) {
+    if call.name().as_slice() != b"last" || arg_count(call) != 0 {
         return;
     }
-    if let Some(recv_send) = receiver_as_send(&send.recv)
-        && recv_send.method_name == "select"
-        && has_block_pass(&recv_send.args)
+    if let Some(recv_call) = receiver_as_call(&call.receiver())
+        && recv_call.name().as_slice() == b"select"
+        && has_block_pass(&recv_call)
     {
         offenses.push(Offense::new(
             OffenseKind::SelectLastVsReverseDetect,
-            send.expression_l.begin,
+            call.location().start_offset(),
         ));
     }
 }
 
-/// `.map{}.flatten(1)` → `.flat_map{}` (when receiver is a plain Send)
-fn check_map_flatten(send: &Send, offenses: &mut Vec<Offense>) {
-    if send.method_name != "flatten" || send.args.len() != 1 || !is_int_one(&send.args[0]) {
+/// `.map{}.flatten(1)` → `.flat_map{}` (when receiver is a plain call with block_pass, not full block)
+fn check_map_flatten(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offense>) {
+    if call.name().as_slice() != b"flatten" {
         return;
     }
-    if receiver_is_send_with_name(&send.recv, "map") {
+    let args = call_args(call);
+    if args.len() != 1 || !is_int_one(&args[0]) {
+        return;
+    }
+    // Only match when receiver is map WITHOUT a full block (block_pass is ok).
+    // Full block cases are handled by scan_call_on_block_call.
+    if let Some(recv_call) = receiver_as_call(&call.receiver())
+        && recv_call.name().as_slice() == b"map"
+        && !has_full_block(&recv_call)
+    {
         offenses.push(Offense::new(
             OffenseKind::MapFlattenVsFlatMap,
-            send.expression_l.begin,
+            call.location().start_offset(),
         ));
     }
 }
 
 /// `.each_with_index` → while loop
-fn check_each_with_index(send: &Send, offenses: &mut Vec<Offense>) {
-    if send.method_name == "each_with_index" {
+fn check_each_with_index(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offense>) {
+    if call.name().as_slice() == b"each_with_index" {
         offenses.push(Offense::new(
             OffenseKind::EachWithIndexVsWhile,
-            send.expression_l.begin,
+            call.location().start_offset(),
         ));
     }
 }
 
 /// `(1..10).include?` → `.cover?`
-fn check_include_vs_cover(send: &Send, offenses: &mut Vec<Offense>) {
-    if send.method_name != "include?" || !receiver_is_range(&send.recv) {
+fn check_include_vs_cover(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offense>) {
+    if call.name().as_slice() != b"include?" || !receiver_is_range(&call.receiver()) {
         return;
     }
-    let offense = match send.selector_l.as_ref() {
+    let offense = match call.message_loc() {
         Some(sel_l) => {
-            let fix = Fix::single(sel_l.begin, sel_l.end, "cover?");
+            let fix = Fix::single(sel_l.start_offset(), sel_l.end_offset(), "cover?");
             Offense::with_fix(
                 OffenseKind::IncludeVsCoverOnRange,
-                send.expression_l.begin,
+                call.location().start_offset(),
                 fix,
             )
         }
-        None => Offense::new(OffenseKind::IncludeVsCoverOnRange, send.expression_l.begin),
+        None => Offense::new(
+            OffenseKind::IncludeVsCoverOnRange,
+            call.location().start_offset(),
+        ),
     };
     offenses.push(offense);
 }
 
 /// `.gsub("x", "y")` → `.tr("x", "y")` when both args are single-char strings
-fn check_gsub_vs_tr(send: &Send, offenses: &mut Vec<Offense>) {
-    if send.method_name != "gsub" || send.args.len() != 2 {
+fn check_gsub_vs_tr(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offense>) {
+    if call.name().as_slice() != b"gsub" {
         return;
     }
-    if is_single_char_string(&send.args[0]) && is_single_char_string(&send.args[1]) {
-        let offense = match send.selector_l.as_ref() {
+    let args = call_args(call);
+    if args.len() != 2 {
+        return;
+    }
+    if is_single_char_string(&args[0]) && is_single_char_string(&args[1]) {
+        let offense = match call.message_loc() {
             Some(sel_l) => {
-                let fix = Fix::single(sel_l.begin, sel_l.end, "tr");
-                Offense::with_fix(OffenseKind::GsubVsTr, send.expression_l.begin, fix)
+                let fix = Fix::single(sel_l.start_offset(), sel_l.end_offset(), "tr");
+                Offense::with_fix(OffenseKind::GsubVsTr, call.location().start_offset(), fix)
             }
-            None => Offense::new(OffenseKind::GsubVsTr, send.expression_l.begin),
+            None => Offense::new(OffenseKind::GsubVsTr, call.location().start_offset()),
         };
         offenses.push(offense);
     }
 }
 
 /// `.sort { |a, b| ... }` → `.sort_by` (only fires when sort has a block)
-fn check_sort_vs_sort_by(send: &Send, offenses: &mut Vec<Offense>) {
-    if send.method_name == "sort" {
+fn check_sort_vs_sort_by(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offense>) {
+    if call.name().as_slice() == b"sort" {
         offenses.push(Offense::new(
             OffenseKind::SortVsSortBy,
-            send.expression_l.begin,
+            call.location().start_offset(),
         ));
     }
 }
 
 /// `.fetch(k, v)` → `.fetch(k) { v }`
-fn check_fetch_with_argument(send: &Send, offenses: &mut Vec<Offense>) {
-    if send.method_name == "fetch"
-        && arg_count_without_block_pass(&send.args) == 2
-        && !has_block_pass(&send.args)
-    {
+fn check_fetch_with_argument(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offense>) {
+    if call.name().as_slice() == b"fetch" && arg_count(call) == 2 && !has_block_pass(call) {
         offenses.push(Offense::new(
             OffenseKind::FetchWithArgumentVsBlock,
-            send.expression_l.begin,
+            call.location().start_offset(),
         ));
     }
 }
 
 /// `.merge!({k: v})` → `h[k] = v` (single pair hash argument)
-fn check_hash_merge_bang(send: &Send, offenses: &mut Vec<Offense>) {
-    if send.method_name != "merge!" || send.args.len() != 1 {
+fn check_hash_merge_bang(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offense>) {
+    if call.name().as_slice() != b"merge!" {
         return;
     }
-    if first_arg_is_single_pair_hash(&send.args) {
+    let args = call_args(call);
+    if args.len() != 1 {
+        return;
+    }
+    if first_arg_is_single_pair_hash(&args) {
         offenses.push(Offense::new(
             OffenseKind::HashMergeBangVsHashBrackets,
-            send.expression_l.begin,
+            call.location().start_offset(),
         ));
     }
 }
 
 /// `.module_eval("def ...")` → `define_method`
-fn check_module_eval_send(send: &Send, offenses: &mut Vec<Offense>) {
-    if send.method_name != "module_eval" {
+fn check_module_eval_call(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offense>) {
+    if call.name().as_slice() != b"module_eval" {
         return;
     }
-    if let Some(first_arg) = send.args.first()
+    let args = call_args(call);
+    if let Some(first_arg) = args.first()
         && str_contains_def(first_arg)
     {
         offenses.push(Offense::new(
             OffenseKind::ModuleEval,
-            send.expression_l.begin,
+            call.location().start_offset(),
         ));
     }
 }
 
 /// `.map { |x| x.foo }` → `.map(&:foo)`
-fn check_block_vs_symbol_to_proc(send: &Send, block: &Block, offenses: &mut Vec<Offense>) {
-    // Must not be a lambda literal
-    if matches!(block.call.as_ref(), Node::Lambda(_)) {
-        return;
-    }
-
-    // Outer method call must have 0 non-block-pass arguments
-    if arg_count_without_block_pass(&send.args) != 0 {
+fn check_block_vs_symbol_to_proc(
+    call: &ruby_prism::CallNode<'_>,
+    block: &ruby_prism::BlockNode<'_>,
+    offenses: &mut Vec<Offense>,
+) {
+    // Outer method call must have 0 arguments
+    if arg_count(call) != 0 {
         return;
     }
 
     // Block must have exactly 1 argument
-    let arg_names = block_arg_names(&block.args);
+    let arg_names = block_arg_names(&block.parameters());
     if arg_names.len() != 1 {
         return;
     }
     let block_arg_name = &arg_names[0];
 
-    // Block body must be a single Send node
-    let body = match block.body.as_deref() {
+    // Block body must be a single CallNode
+    let body = match block.body() {
         Some(node) => node,
         None => return,
     };
 
-    let inner_send = match body {
-        Node::Send(s) => s,
-        _ => return,
+    // If body is a StatementsNode with a single statement, unwrap it
+    let inner_node = if let Some(stmts) = body.as_statements_node() {
+        let body_nodes: Vec<_> = stmts.body().iter().collect();
+        if body_nodes.len() != 1 {
+            return;
+        }
+        body_nodes.into_iter().next().unwrap()
+    } else {
+        body
+    };
+
+    let inner_call = match inner_node.as_call_node() {
+        Some(c) => c,
+        None => return,
     };
 
     // Inner call must have 0 arguments and no block
-    if !inner_send.args.is_empty() {
+    if arg_count(&inner_call) != 0 || inner_call.block().is_some() {
         return;
     }
 
     // Inner call must have a receiver
-    let receiver = match inner_send.recv.as_deref() {
+    let receiver = match inner_call.receiver() {
         Some(r) => r,
         None => return,
     };
 
     // Receiver must not be a primitive
-    if is_primitive(receiver) {
+    if is_primitive(&receiver) {
         return;
     }
 
-    // Receiver must be an Lvar matching the block argument name
-    if let Node::Lvar(lv) = receiver
-        && lv.name == *block_arg_name
+    // Receiver must be a LocalVariableReadNode matching the block argument name
+    if let Some(lv) = receiver.as_local_variable_read_node()
+        && String::from_utf8_lossy(lv.name().as_slice()) == *block_arg_name
     {
         offenses.push(Offense::new(
             OffenseKind::BlockVsSymbolToProc,
-            send.expression_l.begin,
+            call.location().start_offset(),
         ));
     }
 }
@@ -416,52 +456,63 @@ fn check_block_vs_symbol_to_proc(send: &Send, block: &Block, offenses: &mut Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use crate::ast_visitor::node_children;
+    use crate::ast_visitor::for_each_direct_child;
+    use ruby_prism::Node;
 
     fn parse_and_collect(source: &[u8]) -> Vec<Offense> {
-        let result = lib_ruby_parser::Parser::new(source.to_vec(), Default::default()).do_parse();
+        let result = ruby_prism::parse(source);
+        let result = Box::leak(Box::new(result));
         let mut offenses = Vec::new();
-        if let Some(ast) = result.ast {
-            walk_for_offenses(&ast, &mut offenses);
-        }
+        let root = result.node();
+        walk_for_offenses(&root, &mut offenses);
         offenses
     }
 
-    /// Walk AST matching real analyzer behavior: Block's inner Send is NOT
-    /// visited by scan_send (only scan_block handles it).
-    fn walk_for_offenses(node: &Node, offenses: &mut Vec<Offense>) {
+    /// Walk AST matching real analyzer behavior.
+    fn walk_for_offenses<'pr>(node: &Node<'pr>, offenses: &mut Vec<Offense>) {
         match node {
-            Node::Send(s) => {
-                if let Some(Node::Block(recv_block)) = s.recv.as_deref() {
-                    offenses.extend(scan_send_on_block(s, recv_block));
-                }
-                offenses.extend(scan_send(s));
-                for child in node_children(node) {
-                    walk_for_offenses(child, offenses);
-                }
-            }
-            Node::Block(b) => {
-                offenses.extend(scan_block(b));
-                if let Node::Send(s) = b.call.as_ref() {
-                    if let Some(recv) = &s.recv {
-                        walk_for_offenses(recv, offenses);
-                    }
-                    for arg in &s.args {
-                        walk_for_offenses(arg, offenses);
+            Node::CallNode { .. } => {
+                let call = node.as_call_node().unwrap();
+
+                // Check receiver-is-block-call chains
+                if let Some(recv) = call.receiver() {
+                    if let Some(recv_call) = recv.as_call_node() {
+                        if let Some(Node::BlockNode { .. }) = recv_call.block() {
+                            offenses.extend(scan_call_on_block_call(&call, &recv_call));
+                        }
                     }
                 }
-                if let Some(args) = &b.args {
-                    walk_for_offenses(args, offenses);
-                }
-                if let Some(body) = &b.body {
-                    walk_for_offenses(body, offenses);
+
+                match call.block() {
+                    Some(Node::BlockNode { .. }) => {
+                        let block = call.block().unwrap().as_block_node().unwrap();
+                        offenses.extend(scan_call_with_block(&call, &block));
+                        // Walk receiver and arguments
+                        if let Some(recv) = call.receiver() {
+                            walk_for_offenses(&recv, offenses);
+                        }
+                        if let Some(args) = call.arguments() {
+                            for arg in args.arguments().iter() {
+                                walk_for_offenses(&arg, offenses);
+                            }
+                        }
+                        // Walk block body
+                        if let Some(body) = block.body() {
+                            walk_for_offenses(&body, offenses);
+                        }
+                    }
+                    _ => {
+                        offenses.extend(scan_call(&call));
+                        for_each_direct_child(node, &mut |child| {
+                            walk_for_offenses(child, offenses);
+                        });
+                    }
                 }
             }
             _ => {
-                for child in node_children(node) {
+                for_each_direct_child(node, &mut |child| {
                     walk_for_offenses(child, offenses);
-                }
+                });
             }
         }
     }
@@ -622,8 +673,6 @@ mod tests {
         assert!(!o.iter().any(|x| x.kind == OffenseKind::BlockVsSymbolToProc));
     }
 
-    // --- Additional edge case tests ---
-
     #[test]
     fn first_not_on_shuffle_no_fire() {
         let o = parse_and_collect(b"arr.first");
@@ -710,7 +759,6 @@ mod tests {
 
     #[test]
     fn block_no_body_no_symbol_to_proc() {
-        // Empty block body
         let o = parse_and_collect(b"arr.map { |x| }");
         assert!(!o.iter().any(|x| x.kind == OffenseKind::BlockVsSymbolToProc));
     }
@@ -771,7 +819,6 @@ mod tests {
 
     #[test]
     fn include_on_parenthesized_range() {
-        // Single-paren range — parsed as Begin(Irange)
         let o = parse_and_collect(b"(1..10).include?(5)");
         assert!(
             o.iter()
@@ -805,7 +852,6 @@ mod tests {
 
     #[test]
     fn keys_each_with_keys_having_args_no_fire() {
-        // keys("x") is not Hash#keys — should not fire
         let o = parse_and_collect(b"h.keys(\"x\").each { |k| k }");
         assert!(!o.iter().any(|x| x.kind == OffenseKind::KeysEachVsEachKey));
     }

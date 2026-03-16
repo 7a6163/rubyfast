@@ -1,7 +1,5 @@
 use std::collections::HashSet;
 
-use lib_ruby_parser::source::Comment;
-
 use crate::ast_helpers::byte_offset_to_line;
 use crate::offense::OffenseKind;
 
@@ -21,7 +19,7 @@ impl DisabledSet {
     }
 }
 
-/// Build a DisabledSet from parser comments, source bytes, and pre-computed newline positions.
+/// Build a DisabledSet from a parse result, source bytes, and pre-computed newline positions.
 ///
 /// Supports:
 /// - `# rubyfast:disable rule` or `# fasterer:disable rule` — trailing (same line) or block start
@@ -30,7 +28,7 @@ impl DisabledSet {
 /// - `# rubyfast:disable all` — disable all rules
 /// - `# rubyfast:disable rule1, rule2` — multiple rules
 pub fn build_disabled_set(
-    comments: &[Comment],
+    parse_result: &ruby_prism::ParseResult<'_>,
     source: &[u8],
     newline_positions: &[usize],
 ) -> DisabledSet {
@@ -43,9 +41,10 @@ pub fn build_disabled_set(
     let mut block_all_start: Option<usize> = None;
     let mut block_rule_starts: Vec<(OffenseKind, usize)> = Vec::new();
 
-    for comment in comments {
-        let begin = comment.location.begin;
-        let end = comment.location.end;
+    for comment in parse_result.comments() {
+        let loc = comment.location();
+        let begin = loc.start_offset();
+        let end = loc.end_offset();
         let comment_line = byte_offset_to_line(newline_positions, begin);
         let comment_text = &source[begin..end.min(source.len())];
         let comment_str = String::from_utf8_lossy(comment_text);
@@ -232,10 +231,10 @@ mod tests {
     use super::*;
 
     fn parse_and_build(source: &str) -> DisabledSet {
-        let bytes = source.as_bytes().to_vec();
-        let result = lib_ruby_parser::Parser::new(bytes.clone(), Default::default()).do_parse();
-        let newline_positions = crate::ast_helpers::compute_newline_positions(&bytes);
-        build_disabled_set(&result.comments, &bytes, &newline_positions)
+        let bytes = source.as_bytes();
+        let result = ruby_prism::parse(bytes);
+        let newline_positions = crate::ast_helpers::compute_newline_positions(bytes);
+        build_disabled_set(&result, bytes, &newline_positions)
     }
 
     #[test]

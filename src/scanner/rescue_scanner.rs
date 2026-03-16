@@ -1,60 +1,64 @@
-use lib_ruby_parser::Node;
-use lib_ruby_parser::nodes::RescueBody;
+use ruby_prism::Node;
 
 use crate::offense::{Offense, OffenseKind};
 
 /// Fires when a rescue clause catches `NoMethodError`.
-pub fn scan(node: &RescueBody) -> Vec<Offense> {
+pub fn scan(node: &ruby_prism::RescueNode<'_>) -> Vec<Offense> {
     if rescues_no_method_error(node) {
         vec![Offense::new(
             OffenseKind::RescueVsRespondTo,
-            node.keyword_l.begin,
+            node.keyword_loc().start_offset(),
         )]
     } else {
         vec![]
     }
 }
 
-fn rescues_no_method_error(rb: &RescueBody) -> bool {
-    let exc_list = match rb.exc_list.as_deref() {
-        Some(node) => node,
-        None => return false,
-    };
-
-    match exc_list {
-        Node::Array(arr) => arr.elements.iter().any(is_no_method_error_const),
-        node => is_no_method_error_const(node),
+fn rescues_no_method_error(rb: &ruby_prism::RescueNode<'_>) -> bool {
+    let exceptions: Vec<Node<'_>> = rb.exceptions().iter().collect();
+    if exceptions.is_empty() {
+        return false;
     }
+    exceptions.iter().any(|exc| is_no_method_error_const(exc))
 }
 
-fn is_no_method_error_const(node: &Node) -> bool {
-    match node {
-        Node::Const(c) => c.name == "NoMethodError" && c.scope.is_none(),
-        _ => false,
+fn is_no_method_error_const(node: &Node<'_>) -> bool {
+    if let Some(c) = node.as_constant_read_node() {
+        c.name().as_slice() == b"NoMethodError"
+    } else {
+        false
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use crate::ast_visitor::node_children;
+    use crate::ast_visitor::for_each_direct_child;
 
     fn parse_and_find_rescue_bodies(source: &[u8]) -> Vec<Offense> {
-        let result = lib_ruby_parser::Parser::new(source.to_vec(), Default::default()).do_parse();
+        let result = ruby_prism::parse(source);
+        let result = Box::leak(Box::new(result));
         let mut offenses = Vec::new();
-        if let Some(ast) = result.ast {
-            collect_rescue_offenses(&ast, &mut offenses);
-        }
+        collect_rescue_offenses(&result.node(), &mut offenses);
         offenses
     }
 
-    fn collect_rescue_offenses(node: &Node, offenses: &mut Vec<Offense>) {
-        if let Node::RescueBody(rb) = node {
-            offenses.extend(scan(rb));
+    fn collect_rescue_offenses<'pr>(node: &Node<'pr>, offenses: &mut Vec<Offense>) {
+        // For BeginNode, we need to access the rescue clause specially
+        if let Some(begin) = node.as_begin_node() {
+            if let Some(rescue) = begin.rescue_clause() {
+                collect_from_rescue_chain(&rescue, offenses);
+            }
         }
-        for child in node_children(node) {
+        for_each_direct_child(node, &mut |child| {
             collect_rescue_offenses(child, offenses);
+        });
+    }
+
+    fn collect_from_rescue_chain(rescue: &ruby_prism::RescueNode<'_>, offenses: &mut Vec<Offense>) {
+        offenses.extend(scan(rescue));
+        if let Some(subsequent) = rescue.subsequent() {
+            collect_from_rescue_chain(&subsequent, offenses);
         }
     }
 

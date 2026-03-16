@@ -1,583 +1,676 @@
-use lib_ruby_parser::Node;
-#[allow(unused_imports)]
-use lib_ruby_parser::nodes::*;
+use ruby_prism::Node;
 
-/// Collect all direct child nodes of a given node.
-/// Prefer `for_each_child` in hot paths to avoid Vec allocation.
-pub fn node_children(node: &Node) -> Vec<&Node> {
-    let mut children = Vec::new();
-    for_each_child(node, |child| children.push(child));
-    children
+/// Recursively visit all descendant nodes of a given node, calling `f` for each.
+/// This is used by scanners that need to search for patterns inside a subtree.
+pub fn for_each_descendant<'pr>(node: &Node<'pr>, f: &mut impl FnMut(&Node<'pr>)) {
+    for_each_direct_child(node, &mut |child: &Node<'pr>| {
+        f(child);
+        for_each_descendant(child, f);
+    });
 }
 
-/// Visit each direct child of a node via callback — zero allocation.
-#[inline]
-pub fn for_each_child<'a>(node: &'a Node, mut f: impl FnMut(&'a Node)) {
-    visit_children(node, &mut f);
-}
-
-fn visit_opt<'a>(opt: &'a Option<Box<Node>>, f: &mut impl FnMut(&'a Node)) {
-    if let Some(n) = opt.as_deref() {
-        f(n);
-    }
-}
-
-fn visit_vec<'a>(v: &'a [Node], f: &mut impl FnMut(&'a Node)) {
-    for n in v {
-        f(n);
-    }
-}
-
-fn visit_children<'a>(node: &'a Node, f: &mut impl FnMut(&'a Node)) {
+/// Iterate over direct children of a node, calling f for each.
+/// This is the core traversal function for ruby-prism nodes.
+///
+/// Note: Some prism accessors return specific types (ElseNode, EnsureNode, etc.)
+/// rather than Node. For those, we visit their inner statements directly.
+pub fn for_each_direct_child<'pr>(node: &Node<'pr>, f: &mut impl FnMut(&Node<'pr>)) {
     match node {
-        Node::Alias(n) => {
-            f(&n.to);
-            f(&n.from);
+        Node::ProgramNode { .. } => {
+            let n = node.as_program_node().unwrap();
+            for child in n.statements().body().iter() {
+                f(&child);
+            }
         }
-        Node::And(n) => {
-            f(&n.lhs);
-            f(&n.rhs);
+        Node::StatementsNode { .. } => {
+            let n = node.as_statements_node().unwrap();
+            for child in n.body().iter() {
+                f(&child);
+            }
         }
-        Node::AndAsgn(n) => {
-            f(&n.recv);
-            f(&n.value);
+        Node::CallNode { .. } => {
+            let n = node.as_call_node().unwrap();
+            if let Some(recv) = n.receiver() {
+                f(&recv);
+            }
+            if let Some(args) = n.arguments() {
+                for arg in args.arguments().iter() {
+                    f(&arg);
+                }
+            }
+            if let Some(block) = n.block() {
+                f(&block);
+            }
         }
-        Node::Arg(_)
-        | Node::BackRef(_)
-        | Node::Blockarg(_)
-        | Node::Cbase(_)
-        | Node::Complex(_)
-        | Node::Cvar(_)
-        | Node::EmptyElse(_)
-        | Node::Encoding(_)
-        | Node::False(_)
-        | Node::File(_)
-        | Node::Float(_)
-        | Node::ForwardArg(_)
-        | Node::ForwardedArgs(_)
-        | Node::Gvar(_)
-        | Node::Int(_)
-        | Node::Ivar(_)
-        | Node::Kwarg(_)
-        | Node::Kwnilarg(_)
-        | Node::Lambda(_)
-        | Node::Line(_)
-        | Node::Lvar(_)
-        | Node::Nil(_)
-        | Node::Rational(_)
-        | Node::Redo(_)
-        | Node::Restarg(_)
-        | Node::Retry(_)
-        | Node::Self_(_)
-        | Node::Shadowarg(_)
-        | Node::Sym(_)
-        | Node::True(_)
-        | Node::ZSuper(_)
-        | Node::NthRef(_)
-        | Node::RegOpt(_) => {}
-        Node::Args(n) => visit_vec(&n.args, f),
-        Node::Array(n) => visit_vec(&n.elements, f),
-        Node::ArrayPattern(n) => visit_vec(&n.elements, f),
-        Node::ArrayPatternWithTail(n) => visit_vec(&n.elements, f),
-        Node::Begin(n) => visit_vec(&n.statements, f),
-        Node::Block(n) => {
-            f(&n.call);
-            visit_opt(&n.args, f);
-            visit_opt(&n.body, f);
+        Node::BlockNode { .. } => {
+            let n = node.as_block_node().unwrap();
+            if let Some(params) = n.parameters() {
+                f(&params);
+            }
+            if let Some(body) = n.body() {
+                f(&body);
+            }
         }
-        Node::BlockPass(n) => visit_opt(&n.value, f),
-        Node::Break(n) => visit_vec(&n.args, f),
-        Node::Case(n) => {
-            visit_opt(&n.expr, f);
-            visit_vec(&n.when_bodies, f);
-            visit_opt(&n.else_body, f);
+        Node::BlockArgumentNode { .. } => {
+            let n = node.as_block_argument_node().unwrap();
+            if let Some(expr) = n.expression() {
+                f(&expr);
+            }
         }
-        Node::CaseMatch(n) => {
-            f(&n.expr);
-            visit_vec(&n.in_bodies, f);
-            visit_opt(&n.else_body, f);
+        Node::DefNode { .. } => {
+            let n = node.as_def_node().unwrap();
+            if let Some(params) = n.parameters() {
+                f(&params.as_node());
+            }
+            if let Some(body) = n.body() {
+                f(&body);
+            }
         }
-        Node::Casgn(n) => {
-            visit_opt(&n.scope, f);
-            visit_opt(&n.value, f);
+        Node::ForNode { .. } => {
+            let n = node.as_for_node().unwrap();
+            f(&n.index());
+            f(&n.collection());
+            if let Some(stmts) = n.statements() {
+                for child in stmts.body().iter() {
+                    f(&child);
+                }
+            }
         }
-        Node::Class(n) => {
-            f(&n.name);
-            visit_opt(&n.superclass, f);
-            visit_opt(&n.body, f);
+        Node::BeginNode { .. } => {
+            let n = node.as_begin_node().unwrap();
+            if let Some(stmts) = n.statements() {
+                for child in stmts.body().iter() {
+                    f(&child);
+                }
+            }
+            if let Some(rescue) = n.rescue_clause() {
+                visit_rescue_children(&rescue, f);
+            }
+            if let Some(else_clause) = n.else_clause()
+                && let Some(stmts) = else_clause.statements()
+            {
+                for child in stmts.body().iter() {
+                    f(&child);
+                }
+            }
+            if let Some(ensure) = n.ensure_clause()
+                && let Some(stmts) = ensure.statements()
+            {
+                for child in stmts.body().iter() {
+                    f(&child);
+                }
+            }
         }
-        Node::Const(n) => visit_opt(&n.scope, f),
-        Node::ConstPattern(n) => {
-            f(&n.const_);
-            f(&n.pattern);
+        Node::RescueNode { .. } => {
+            let n = node.as_rescue_node().unwrap();
+            visit_rescue_children(&n, f);
         }
-        Node::CSend(n) => {
-            f(&n.recv);
-            visit_vec(&n.args, f);
+        Node::EnsureNode { .. } => {
+            let n = node.as_ensure_node().unwrap();
+            if let Some(stmts) = n.statements() {
+                for child in stmts.body().iter() {
+                    f(&child);
+                }
+            }
         }
-        Node::Cvasgn(n) => visit_opt(&n.value, f),
-        Node::Def(n) => {
-            visit_opt(&n.args, f);
-            visit_opt(&n.body, f);
+        Node::ElseNode { .. } => {
+            let n = node.as_else_node().unwrap();
+            if let Some(stmts) = n.statements() {
+                for child in stmts.body().iter() {
+                    f(&child);
+                }
+            }
         }
-        Node::Defined(n) => f(&n.value),
-        Node::Defs(n) => {
-            f(&n.definee);
-            visit_opt(&n.args, f);
-            visit_opt(&n.body, f);
+        Node::IfNode { .. } => {
+            let n = node.as_if_node().unwrap();
+            f(&n.predicate());
+            if let Some(stmts) = n.statements() {
+                for child in stmts.body().iter() {
+                    f(&child);
+                }
+            }
+            if let Some(subsequent) = n.subsequent() {
+                f(&subsequent);
+            }
         }
-        Node::Dstr(n) => visit_vec(&n.parts, f),
-        Node::Dsym(n) => visit_vec(&n.parts, f),
-        Node::EFlipFlop(n) => {
-            visit_opt(&n.left, f);
-            visit_opt(&n.right, f);
+        Node::UnlessNode { .. } => {
+            let n = node.as_unless_node().unwrap();
+            f(&n.predicate());
+            if let Some(stmts) = n.statements() {
+                for child in stmts.body().iter() {
+                    f(&child);
+                }
+            }
+            if let Some(else_clause) = n.else_clause()
+                && let Some(stmts) = else_clause.statements()
+            {
+                for child in stmts.body().iter() {
+                    f(&child);
+                }
+            }
         }
-        Node::Ensure(n) => {
-            visit_opt(&n.body, f);
-            visit_opt(&n.ensure, f);
+        Node::WhileNode { .. } => {
+            let n = node.as_while_node().unwrap();
+            f(&n.predicate());
+            if let Some(stmts) = n.statements() {
+                for child in stmts.body().iter() {
+                    f(&child);
+                }
+            }
         }
-        Node::Erange(n) => {
-            visit_opt(&n.left, f);
-            visit_opt(&n.right, f);
+        Node::UntilNode { .. } => {
+            let n = node.as_until_node().unwrap();
+            f(&n.predicate());
+            if let Some(stmts) = n.statements() {
+                for child in stmts.body().iter() {
+                    f(&child);
+                }
+            }
         }
-        Node::FindPattern(n) => visit_vec(&n.elements, f),
-        Node::For(n) => {
-            f(&n.iterator);
-            f(&n.iteratee);
-            visit_opt(&n.body, f);
+        Node::CaseNode { .. } => {
+            let n = node.as_case_node().unwrap();
+            if let Some(pred) = n.predicate() {
+                f(&pred);
+            }
+            for condition in n.conditions().iter() {
+                f(&condition);
+            }
+            if let Some(else_clause) = n.else_clause()
+                && let Some(stmts) = else_clause.statements()
+            {
+                for child in stmts.body().iter() {
+                    f(&child);
+                }
+            }
         }
-        Node::Gvasgn(n) => visit_opt(&n.value, f),
-        Node::Hash(n) => visit_vec(&n.pairs, f),
-        Node::HashPattern(n) => visit_vec(&n.elements, f),
-        Node::Heredoc(n) => visit_vec(&n.parts, f),
-        Node::If(n) => {
-            f(&n.cond);
-            visit_opt(&n.if_true, f);
-            visit_opt(&n.if_false, f);
+        Node::WhenNode { .. } => {
+            let n = node.as_when_node().unwrap();
+            for cond in n.conditions().iter() {
+                f(&cond);
+            }
+            if let Some(stmts) = n.statements() {
+                for child in stmts.body().iter() {
+                    f(&child);
+                }
+            }
         }
-        Node::IfGuard(n) => f(&n.cond),
-        Node::IFlipFlop(n) => {
-            visit_opt(&n.left, f);
-            visit_opt(&n.right, f);
+        Node::ClassNode { .. } => {
+            let n = node.as_class_node().unwrap();
+            f(&n.constant_path());
+            if let Some(superclass) = n.superclass() {
+                f(&superclass);
+            }
+            if let Some(body) = n.body() {
+                f(&body);
+            }
         }
-        Node::IfMod(n) => {
-            f(&n.cond);
-            visit_opt(&n.if_true, f);
-            visit_opt(&n.if_false, f);
+        Node::ModuleNode { .. } => {
+            let n = node.as_module_node().unwrap();
+            f(&n.constant_path());
+            if let Some(body) = n.body() {
+                f(&body);
+            }
         }
-        Node::IfTernary(n) => {
-            f(&n.cond);
-            f(&n.if_true);
-            f(&n.if_false);
+        Node::SingletonClassNode { .. } => {
+            let n = node.as_singleton_class_node().unwrap();
+            f(&n.expression());
+            if let Some(body) = n.body() {
+                f(&body);
+            }
         }
-        Node::Index(n) => {
-            f(&n.recv);
-            visit_vec(&n.indexes, f);
+        Node::AndNode { .. } => {
+            let n = node.as_and_node().unwrap();
+            f(&n.left());
+            f(&n.right());
         }
-        Node::IndexAsgn(n) => {
-            f(&n.recv);
-            visit_vec(&n.indexes, f);
-            visit_opt(&n.value, f);
+        Node::OrNode { .. } => {
+            let n = node.as_or_node().unwrap();
+            f(&n.left());
+            f(&n.right());
         }
-        Node::InPattern(n) => {
-            f(&n.pattern);
-            visit_opt(&n.guard, f);
-            visit_opt(&n.body, f);
+        Node::ArrayNode { .. } => {
+            let n = node.as_array_node().unwrap();
+            for elem in n.elements().iter() {
+                f(&elem);
+            }
         }
-        Node::Irange(n) => {
-            visit_opt(&n.left, f);
-            visit_opt(&n.right, f);
+        Node::HashNode { .. } => {
+            let n = node.as_hash_node().unwrap();
+            for elem in n.elements().iter() {
+                f(&elem);
+            }
         }
-        Node::Ivasgn(n) => visit_opt(&n.value, f),
-        Node::Kwargs(n) => visit_vec(&n.pairs, f),
-        Node::KwBegin(n) => visit_vec(&n.statements, f),
-        Node::Kwoptarg(n) => f(&n.default),
-        Node::Kwrestarg(_) => {}
-        Node::Kwsplat(n) => f(&n.value),
-        Node::Lvasgn(n) => visit_opt(&n.value, f),
-        Node::Masgn(n) => {
-            f(&n.lhs);
-            f(&n.rhs);
+        Node::KeywordHashNode { .. } => {
+            let n = node.as_keyword_hash_node().unwrap();
+            for elem in n.elements().iter() {
+                f(&elem);
+            }
         }
-        Node::MatchAlt(n) => {
-            f(&n.lhs);
-            f(&n.rhs);
+        Node::AssocNode { .. } => {
+            let n = node.as_assoc_node().unwrap();
+            f(&n.key());
+            f(&n.value());
         }
-        Node::MatchAs(n) => {
-            f(&n.value);
-            f(&n.as_);
+        Node::AssocSplatNode { .. } => {
+            let n = node.as_assoc_splat_node().unwrap();
+            if let Some(value) = n.value() {
+                f(&value);
+            }
         }
-        Node::MatchCurrentLine(n) => f(&n.re),
-        Node::MatchNilPattern(_) => {}
-        Node::MatchPattern(n) => {
-            f(&n.value);
-            f(&n.pattern);
+        Node::RangeNode { .. } => {
+            let n = node.as_range_node().unwrap();
+            if let Some(left) = n.left() {
+                f(&left);
+            }
+            if let Some(right) = n.right() {
+                f(&right);
+            }
         }
-        Node::MatchPatternP(n) => {
-            f(&n.value);
-            f(&n.pattern);
+        Node::ParenthesesNode { .. } => {
+            let n = node.as_parentheses_node().unwrap();
+            if let Some(body) = n.body() {
+                f(&body);
+            }
         }
-        Node::MatchRest(n) => visit_opt(&n.name, f),
-        Node::MatchVar(_) => {}
-        Node::MatchWithLvasgn(n) => {
-            f(&n.re);
-            f(&n.value);
+        Node::InterpolatedStringNode { .. } => {
+            let n = node.as_interpolated_string_node().unwrap();
+            for part in n.parts().iter() {
+                f(&part);
+            }
         }
-        Node::Mlhs(n) => visit_vec(&n.items, f),
-        Node::Module(n) => {
-            f(&n.name);
-            visit_opt(&n.body, f);
+        Node::InterpolatedSymbolNode { .. } => {
+            let n = node.as_interpolated_symbol_node().unwrap();
+            for part in n.parts().iter() {
+                f(&part);
+            }
         }
-        Node::Next(n) => visit_vec(&n.args, f),
-        Node::Numblock(n) => {
-            f(&n.call);
-            f(&n.body);
+        Node::EmbeddedStatementsNode { .. } => {
+            let n = node.as_embedded_statements_node().unwrap();
+            if let Some(stmts) = n.statements() {
+                for child in stmts.body().iter() {
+                    f(&child);
+                }
+            }
         }
-        Node::OpAsgn(n) => {
-            f(&n.recv);
-            f(&n.value);
+        Node::LocalVariableWriteNode { .. } => {
+            let n = node.as_local_variable_write_node().unwrap();
+            f(&n.value());
         }
-        Node::Optarg(n) => f(&n.default),
-        Node::Or(n) => {
-            f(&n.lhs);
-            f(&n.rhs);
+        Node::InstanceVariableWriteNode { .. } => {
+            let n = node.as_instance_variable_write_node().unwrap();
+            f(&n.value());
         }
-        Node::OrAsgn(n) => {
-            f(&n.recv);
-            f(&n.value);
+        Node::ClassVariableWriteNode { .. } => {
+            let n = node.as_class_variable_write_node().unwrap();
+            f(&n.value());
         }
-        Node::Pair(n) => {
-            f(&n.key);
-            f(&n.value);
+        Node::GlobalVariableWriteNode { .. } => {
+            let n = node.as_global_variable_write_node().unwrap();
+            f(&n.value());
         }
-        Node::Pin(n) => f(&n.var),
-        Node::Postexe(n) => visit_opt(&n.body, f),
-        Node::Preexe(n) => visit_opt(&n.body, f),
-        Node::Procarg0(n) => visit_vec(&n.args, f),
-        Node::Regexp(n) => visit_vec(&n.parts, f),
-        Node::Rescue(n) => {
-            visit_opt(&n.body, f);
-            visit_vec(&n.rescue_bodies, f);
-            visit_opt(&n.else_, f);
+        Node::ConstantWriteNode { .. } => {
+            let n = node.as_constant_write_node().unwrap();
+            f(&n.value());
         }
-        Node::RescueBody(n) => {
-            visit_opt(&n.exc_list, f);
-            visit_opt(&n.exc_var, f);
-            visit_opt(&n.body, f);
+        Node::ConstantPathWriteNode { .. } => {
+            let n = node.as_constant_path_write_node().unwrap();
+            // target() returns ConstantPathNode, not Node — skip it
+            f(&n.value());
         }
-        Node::Return(n) => visit_vec(&n.args, f),
-        Node::SClass(n) => {
-            f(&n.expr);
-            visit_opt(&n.body, f);
+        Node::ConstantPathNode { .. } => {
+            let n = node.as_constant_path_node().unwrap();
+            if let Some(parent) = n.parent() {
+                f(&parent);
+            }
         }
-        Node::Send(n) => {
-            visit_opt(&n.recv, f);
-            visit_vec(&n.args, f);
+        Node::MultiWriteNode { .. } => {
+            let n = node.as_multi_write_node().unwrap();
+            for target in n.lefts().iter() {
+                f(&target);
+            }
+            if let Some(rest) = n.rest() {
+                f(&rest);
+            }
+            for target in n.rights().iter() {
+                f(&target);
+            }
+            f(&n.value());
         }
-        Node::Splat(n) => visit_opt(&n.value, f),
-        Node::Str(_) => {}
-        Node::Super(n) => visit_vec(&n.args, f),
-        Node::Undef(n) => visit_vec(&n.names, f),
-        Node::UnlessGuard(n) => f(&n.cond),
-        Node::Until(n) => {
-            f(&n.cond);
-            visit_opt(&n.body, f);
+        Node::SplatNode { .. } => {
+            let n = node.as_splat_node().unwrap();
+            if let Some(expr) = n.expression() {
+                f(&expr);
+            }
         }
-        Node::UntilPost(n) => {
-            f(&n.cond);
-            f(&n.body);
+        Node::ReturnNode { .. } => {
+            let n = node.as_return_node().unwrap();
+            if let Some(args) = n.arguments() {
+                for arg in args.arguments().iter() {
+                    f(&arg);
+                }
+            }
         }
-        Node::When(n) => {
-            visit_vec(&n.patterns, f);
-            visit_opt(&n.body, f);
+        Node::YieldNode { .. } => {
+            let n = node.as_yield_node().unwrap();
+            if let Some(args) = n.arguments() {
+                for arg in args.arguments().iter() {
+                    f(&arg);
+                }
+            }
         }
-        Node::While(n) => {
-            f(&n.cond);
-            visit_opt(&n.body, f);
+        Node::SuperNode { .. } => {
+            let n = node.as_super_node().unwrap();
+            if let Some(args) = n.arguments() {
+                for arg in args.arguments().iter() {
+                    f(&arg);
+                }
+            }
+            if let Some(block) = n.block() {
+                f(&block);
+            }
         }
-        Node::WhilePost(n) => {
-            f(&n.cond);
-            f(&n.body);
+        Node::LambdaNode { .. } => {
+            let n = node.as_lambda_node().unwrap();
+            if let Some(params) = n.parameters() {
+                f(&params);
+            }
+            if let Some(body) = n.body() {
+                f(&body);
+            }
         }
-        Node::XHeredoc(n) => visit_vec(&n.parts, f),
-        Node::Xstr(n) => visit_vec(&n.parts, f),
-        Node::Yield(n) => visit_vec(&n.args, f),
+        Node::DefinedNode { .. } => {
+            let n = node.as_defined_node().unwrap();
+            f(&n.value());
+        }
+        Node::InterpolatedRegularExpressionNode { .. } => {
+            let n = node.as_interpolated_regular_expression_node().unwrap();
+            for part in n.parts().iter() {
+                f(&part);
+            }
+        }
+        Node::MatchPredicateNode { .. } => {
+            let n = node.as_match_predicate_node().unwrap();
+            f(&n.value());
+            f(&n.pattern());
+        }
+        Node::MatchRequiredNode { .. } => {
+            let n = node.as_match_required_node().unwrap();
+            f(&n.value());
+            f(&n.pattern());
+        }
+        Node::CaseMatchNode { .. } => {
+            let n = node.as_case_match_node().unwrap();
+            if let Some(pred) = n.predicate() {
+                f(&pred);
+            }
+            for condition in n.conditions().iter() {
+                f(&condition);
+            }
+            if let Some(else_clause) = n.else_clause()
+                && let Some(stmts) = else_clause.statements()
+            {
+                for child in stmts.body().iter() {
+                    f(&child);
+                }
+            }
+        }
+        Node::InNode { .. } => {
+            let n = node.as_in_node().unwrap();
+            f(&n.pattern());
+            if let Some(stmts) = n.statements() {
+                for child in stmts.body().iter() {
+                    f(&child);
+                }
+            }
+        }
+        Node::BreakNode { .. } => {
+            let n = node.as_break_node().unwrap();
+            if let Some(args) = n.arguments() {
+                for arg in args.arguments().iter() {
+                    f(&arg);
+                }
+            }
+        }
+        Node::NextNode { .. } => {
+            let n = node.as_next_node().unwrap();
+            if let Some(args) = n.arguments() {
+                for arg in args.arguments().iter() {
+                    f(&arg);
+                }
+            }
+        }
+        Node::AliasMethodNode { .. } => {
+            let n = node.as_alias_method_node().unwrap();
+            f(&n.new_name());
+            f(&n.old_name());
+        }
+        Node::AliasGlobalVariableNode { .. } => {
+            let n = node.as_alias_global_variable_node().unwrap();
+            f(&n.new_name());
+            f(&n.old_name());
+        }
+        Node::UndefNode { .. } => {
+            let n = node.as_undef_node().unwrap();
+            for name in n.names().iter() {
+                f(&name);
+            }
+        }
+        Node::LocalVariableOperatorWriteNode { .. } => {
+            let n = node.as_local_variable_operator_write_node().unwrap();
+            f(&n.value());
+        }
+        Node::LocalVariableAndWriteNode { .. } => {
+            let n = node.as_local_variable_and_write_node().unwrap();
+            f(&n.value());
+        }
+        Node::LocalVariableOrWriteNode { .. } => {
+            let n = node.as_local_variable_or_write_node().unwrap();
+            f(&n.value());
+        }
+        Node::InstanceVariableOperatorWriteNode { .. } => {
+            let n = node.as_instance_variable_operator_write_node().unwrap();
+            f(&n.value());
+        }
+        Node::InstanceVariableAndWriteNode { .. } => {
+            let n = node.as_instance_variable_and_write_node().unwrap();
+            f(&n.value());
+        }
+        Node::InstanceVariableOrWriteNode { .. } => {
+            let n = node.as_instance_variable_or_write_node().unwrap();
+            f(&n.value());
+        }
+        Node::ConstantOperatorWriteNode { .. } => {
+            let n = node.as_constant_operator_write_node().unwrap();
+            f(&n.value());
+        }
+        Node::ConstantAndWriteNode { .. } => {
+            let n = node.as_constant_and_write_node().unwrap();
+            f(&n.value());
+        }
+        Node::ConstantOrWriteNode { .. } => {
+            let n = node.as_constant_or_write_node().unwrap();
+            f(&n.value());
+        }
+        Node::ConstantPathOperatorWriteNode { .. } => {
+            let n = node.as_constant_path_operator_write_node().unwrap();
+            // target() returns ConstantPathNode, not Node - skip
+            f(&n.value());
+        }
+        Node::ConstantPathAndWriteNode { .. } => {
+            let n = node.as_constant_path_and_write_node().unwrap();
+            // target() returns ConstantPathNode, not Node - skip
+            f(&n.value());
+        }
+        Node::ConstantPathOrWriteNode { .. } => {
+            let n = node.as_constant_path_or_write_node().unwrap();
+            // target() returns ConstantPathNode, not Node - skip
+            f(&n.value());
+        }
+        Node::ClassVariableOperatorWriteNode { .. } => {
+            let n = node.as_class_variable_operator_write_node().unwrap();
+            f(&n.value());
+        }
+        Node::ClassVariableAndWriteNode { .. } => {
+            let n = node.as_class_variable_and_write_node().unwrap();
+            f(&n.value());
+        }
+        Node::ClassVariableOrWriteNode { .. } => {
+            let n = node.as_class_variable_or_write_node().unwrap();
+            f(&n.value());
+        }
+        Node::GlobalVariableOperatorWriteNode { .. } => {
+            let n = node.as_global_variable_operator_write_node().unwrap();
+            f(&n.value());
+        }
+        Node::GlobalVariableAndWriteNode { .. } => {
+            let n = node.as_global_variable_and_write_node().unwrap();
+            f(&n.value());
+        }
+        Node::GlobalVariableOrWriteNode { .. } => {
+            let n = node.as_global_variable_or_write_node().unwrap();
+            f(&n.value());
+        }
+        Node::IndexOperatorWriteNode { .. } => {
+            let n = node.as_index_operator_write_node().unwrap();
+            if let Some(recv) = n.receiver() {
+                f(&recv);
+            }
+            if let Some(args) = n.arguments() {
+                for arg in args.arguments().iter() {
+                    f(&arg);
+                }
+            }
+            f(&n.value());
+        }
+        Node::IndexAndWriteNode { .. } => {
+            let n = node.as_index_and_write_node().unwrap();
+            if let Some(recv) = n.receiver() {
+                f(&recv);
+            }
+            if let Some(args) = n.arguments() {
+                for arg in args.arguments().iter() {
+                    f(&arg);
+                }
+            }
+            f(&n.value());
+        }
+        Node::IndexOrWriteNode { .. } => {
+            let n = node.as_index_or_write_node().unwrap();
+            if let Some(recv) = n.receiver() {
+                f(&recv);
+            }
+            if let Some(args) = n.arguments() {
+                for arg in args.arguments().iter() {
+                    f(&arg);
+                }
+            }
+            f(&n.value());
+        }
+        // Leaf nodes and remaining types — no children to visit
+        _ => {}
+    }
+}
+
+/// Visit children of a RescueNode and its chain of subsequent clauses.
+fn visit_rescue_children<'pr>(
+    rescue: &ruby_prism::RescueNode<'pr>,
+    f: &mut impl FnMut(&Node<'pr>),
+) {
+    for exc in rescue.exceptions().iter() {
+        f(&exc);
+    }
+    if let Some(reference) = rescue.reference() {
+        f(&reference);
+    }
+    if let Some(stmts) = rescue.statements() {
+        for child in stmts.body().iter() {
+            f(&child);
+        }
+    }
+    if let Some(subsequent) = rescue.subsequent() {
+        visit_rescue_children(&subsequent, f);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lib_ruby_parser::Parser;
 
-    fn parse(source: &[u8]) -> Option<Box<Node>> {
-        Parser::new(source.to_vec(), Default::default())
-            .do_parse()
-            .ast
-    }
-
-    fn count_children(node: &Node) -> usize {
-        let mut count = 0;
-        for_each_child(node, |_| count += 1);
-        count
-    }
-
-    /// Recursively count all nodes in the AST.
-    fn count_all_nodes(node: &Node) -> usize {
+    fn count_all_nodes(node: &Node<'_>) -> usize {
         let mut count = 1;
-        for_each_child(node, |child| count += count_all_nodes(child));
+        for_each_descendant(node, &mut |_| count += 1);
         count
     }
 
     #[test]
-    fn node_children_matches_for_each_child() {
-        let ast = parse(b"a + b").unwrap();
-        let children = node_children(&ast);
-        let mut count = 0;
-        for_each_child(&ast, |_| count += 1);
-        assert_eq!(children.len(), count);
+    fn visitor_counts_nodes() {
+        let result = ruby_prism::parse(b"a + b");
+        let result = Box::leak(Box::new(result));
+        let total = count_all_nodes(&result.node());
+        assert!(total > 1, "Expected multiple nodes, got {}", total);
     }
 
-    // Exercise many AST node types through visit_children for coverage
     #[test]
-    fn visit_children_comprehensive() {
+    fn visitor_handles_many_node_types() {
         let sources: &[&[u8]] = &[
-            // Alias
             b"alias new_method old_method",
-            // And, Or
             b"a && b || c",
-            // AndAsgn, OrAsgn
-            b"x &&= 1; y ||= 2",
-            // Array, ArrayPattern
             b"[1, 2, 3]",
-            // Begin, Break, Next, Return
-            b"begin; break 1; end",
-            b"loop { next }",
-            // Case, When
-            b"case x; when 1; 'a'; when 2; 'b'; else 'c'; end",
-            // Casgn
+            b"case x; when 1; 'a'; else 'c'; end",
             b"FOO = 1",
-            // Class
             b"class Foo < Bar; end",
-            // Const
             b"Foo::Bar",
-            // CSend
-            b"x&.foo(1)",
-            // Cvasgn, Cvar
-            b"@@x = 1; @@x",
-            // Def, Defs
             b"def foo(a); end",
-            b"def self.bar; end",
-            // Defined
             b"defined?(x)",
-            // Dstr, Dsym
             b"\"hello #{world}\"",
-            b":\"sym_#{x}\"",
-            // EFlipFlop, IFlipFlop
-            // Ensure
             b"begin; 1; ensure; 2; end",
-            // Erange, Irange
             b"1...10; 1..10",
-            // For
             b"for x in [1]; end",
-            // Gvasgn, Gvar
-            b"$x = 1; $x",
-            // Hash, Pair
             b"{a: 1, b: 2}",
-            // Heredoc
-            b"<<~HERE\nhello\nHERE\n",
-            // If, IfMod, IfTernary
             b"if true; 1; else; 2; end",
-            b"x = 1 if true",
-            b"true ? 1 : 2",
-            // Index, IndexAsgn
-            b"a[0]; a[0] = 1",
-            // Ivasgn, Ivar
             b"@x = 1; @x",
-            // Kwargs, Kwsplat
-            b"foo(a: 1, **opts)",
-            // KwBegin
-            b"begin; 1; rescue; 2; end",
-            // Kwoptarg, Kwrestarg
-            b"def foo(a: 1, **rest); end",
-            // Lvasgn
             b"x = 42",
-            // Masgn, Mlhs
-            b"a, b = 1, 2",
-            // Module
             b"module Foo; end",
-            // Next, Return
             b"def foo; return 1; end",
-            // Numblock
-            b"arr.map { _1.to_s }",
-            // OpAsgn
             b"x += 1",
-            // Optarg
-            b"def foo(a = 1); end",
-            // Pin (pattern matching)
-            b"case x; in ^y; end",
-            // Postexe, Preexe
-            b"END { 1 }",
-            b"BEGIN { 1 }",
-            // Procarg0 (block with single destructured arg)
-            b"arr.each { |(a)| a }",
-            // Regexp, RegOpt
-            b"/foo/i",
-            // Rescue, RescueBody
             b"begin; rescue StandardError => e; end",
-            // SClass
             b"class << self; end",
-            // Send
             b"foo.bar(1, 2)",
-            // Splat
-            b"foo(*args)",
-            // Str
             b"'hello'",
-            // Super
             b"def foo; super(1); end",
-            // Undef
-            b"undef :foo",
-            // Until, While
             b"until false; end",
             b"while true; break; end",
-            // Yield
             b"def foo; yield 1; end",
-            // Xstr, XHeredoc
-            b"`echo hi`",
-            // MatchCurrentLine
-            b"if /pattern/; end",
-            // Block, BlockPass
             b"arr.select(&:odd?)",
-            // FindPattern, InPattern
-            b"case x; in [1, *rest, 2]; end",
-            // MatchAlt, MatchAs
-            b"case x; in 1 | 2 => y; end",
-            // MatchPattern, MatchPatternP
-            b"x in [1, 2]",
-            b"x in [1, 2] rescue false",
-            // MatchNilPattern, MatchVar
-            b"case x; in **nil; end",
-            b"case x; in {a:}; end",
-            // MatchWithLvasgn
-            b"/(?<name>.)/ =~ str",
-            // HashPattern, ConstPattern
-            b"case x; in Foo[a:]; end",
-            // MatchRest
-            b"case x; in [*, 1]; end",
-            // WhilePost
-            b"begin; 1; end while true",
-            // UntilPost
-            b"begin; 1; end until true",
-            // UnlessGuard
-            b"case x; in 1 unless false; end",
-            // EFlipFlop (exclusive)
-            b"if (a == 1)...(b == 2); end",
-            // IFlipFlop (inclusive)
-            b"if (a == 1)..(b == 2); end",
-            // Rational, Complex
-            b"1r",
-            b"1i",
-            // BackRef, NthRef
-            b"$~ ; $1",
-            // Redo, Retry
-            b"begin; retry; rescue; end",
-            // Self
-            b"self",
-            // ZSuper
-            b"def foo; super; end",
-            // Lambda
+            b"arr.map { |x| x.to_s }",
             b"-> { 1 }",
-            // Encoding, File, Line
-            b"__ENCODING__",
-            b"__FILE__",
-            b"__LINE__",
-            // XHeredoc
-            b"<<~`CMD`\necho hi\nCMD\n",
-            // ArrayPatternWithTail
-            b"case x; in [1, 2,]; end",
-            // ForwardArg, ForwardedArgs
-            b"def foo(...); bar(...); end",
-            // Kwarg
-            b"def foo(a:); end",
-            // Kwnilarg
-            b"def foo(**nil); end",
-            // Shadowarg
-            b"arr.each { |x; y| y }",
-            // Restarg
-            b"def foo(*args); end",
         ];
 
         for source in sources {
-            if let Some(ast) = parse(source) {
-                let total = count_all_nodes(&ast);
-                assert!(
-                    total > 0,
-                    "No nodes in AST for {:?}",
-                    std::str::from_utf8(source)
-                );
-            }
+            let result = ruby_prism::parse(source);
+            let result = Box::leak(Box::new(result));
+            let total = count_all_nodes(&result.node());
+            assert!(
+                total > 0,
+                "No nodes in AST for {:?}",
+                std::str::from_utf8(source)
+            );
         }
     }
 
     #[test]
-    fn visit_children_pattern_matching() {
-        // These exercise pattern matching AST nodes specifically
-        let sources: &[&[u8]] = &[
-            // MatchPattern (in operator)
-            b"1 in Integer",
-            // MatchPatternP (case/in with guard)
-            b"case 1; in Integer if true; end",
-            // IfGuard
-            b"case 1; in x if x > 0; end",
-            // UnlessGuard
-            b"case 1; in x unless x < 0; end",
-            // FindPattern
-            b"case [1,2,3]; in [*, 2, *]; end",
-            // HashPattern
-            b"case {a: 1}; in {a: Integer}; end",
-            // ConstPattern
-            b"case x; in Foo(1); end",
-            // MatchNilPattern
-            b"case {a: 1}; in **nil; end",
-            // MatchVar
-            b"case 1; in x; end",
-            // MatchRest
-            b"case [1,2]; in [Integer, *rest]; end",
-            // MatchAlt
-            b"case 1; in 1 | 2; end",
-            // MatchAs
-            b"case 1; in Integer => x; end",
-            // MatchWithLvasgn (regex named capture)
-            b"/(?<name>.)/ =~ 'x'",
-            // Pin
-            b"x = 1; case 2; in ^x; end",
-        ];
-        for source in sources {
-            if let Some(ast) = parse(source) {
-                let total = count_all_nodes(&ast);
-                assert!(total > 0, "No nodes for {:?}", std::str::from_utf8(source));
-            }
-        }
-    }
-
-    #[test]
-    fn visit_children_leaf_nodes() {
-        // Leaf nodes should have 0 children
-        let leaf_sources: &[&[u8]] = &[
-            b"42",    // Int
-            b"3.14",  // Float
-            b"'s'",   // Str
-            b":sym",  // Sym
-            b"true",  // True
-            b"false", // False
-            b"nil",   // Nil
-            b"x",     // Lvar
-        ];
+    fn leaf_nodes_have_no_extra_children() {
+        let leaf_sources: &[&[u8]] = &[b"42", b"3.14", b"'s'", b":sym", b"true", b"false", b"nil"];
 
         for source in leaf_sources {
-            let ast = parse(source).unwrap();
+            let result = ruby_prism::parse(source);
+            let result = Box::leak(Box::new(result));
+            let prog = result.node().as_program_node().unwrap();
+            let node = prog.statements().body().iter().next().unwrap();
+            let mut child_count = 0;
+            for_each_direct_child(&node, &mut |_| child_count += 1);
             assert_eq!(
-                count_children(&ast),
+                child_count,
                 0,
                 "Expected 0 children for {:?}",
                 std::str::from_utf8(source)

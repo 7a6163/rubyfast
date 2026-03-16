@@ -1,13 +1,14 @@
-use lib_ruby_parser::Node;
-use lib_ruby_parser::nodes::Def;
+use ruby_prism::Node;
 
 use crate::ast_helpers::{
-    body_expressions, def_block_arg_name, def_first_arg_name, def_regular_arg_count,
+    body_expression_count, body_first_expression, def_block_arg_name, def_first_arg_name,
+    def_regular_arg_count,
 };
+use crate::ast_visitor::for_each_descendant;
 use crate::offense::{Offense, OffenseKind};
 
 /// Scan a method definition for proc_call, getter, and setter offenses.
-pub fn scan(def: &Def) -> Vec<Offense> {
+pub fn scan(def: &ruby_prism::DefNode<'_>) -> Vec<Offense> {
     let mut offenses = Vec::new();
 
     check_proc_call_vs_yield(def, &mut offenses);
@@ -18,48 +19,62 @@ pub fn scan(def: &Def) -> Vec<Offense> {
 }
 
 /// `def foo(&block); block.call; end` → use `yield` instead.
-fn check_proc_call_vs_yield(def: &Def, offenses: &mut Vec<Offense>) {
+fn check_proc_call_vs_yield(def: &ruby_prism::DefNode<'_>, offenses: &mut Vec<Offense>) {
     let block_name = match def_block_arg_name(def) {
         Some(name) => name,
         None => return,
     };
 
-    if body_contains_block_call(&def.body, &block_name) {
+    let body = def.body();
+    if body_contains_block_call(&body, &block_name) {
         offenses.push(Offense::new(
             OffenseKind::ProcCallVsYield,
-            def.keyword_l.begin,
+            def.def_keyword_loc().start_offset(),
         ));
     }
 }
 
-fn body_contains_block_call(body: &Option<Box<Node>>, block_name: &str) -> bool {
-    match body.as_deref() {
+fn body_contains_block_call(body: &Option<Node<'_>>, block_name: &str) -> bool {
+    match body {
         Some(node) => node_contains_block_call(node, block_name),
         None => false,
     }
 }
 
-fn node_contains_block_call(node: &Node, block_name: &str) -> bool {
-    if let Node::Send(s) = node
-        && s.method_name == "call"
-        && let Some(Node::Lvar(lv)) = s.recv.as_deref()
-        && lv.name == block_name
+fn node_contains_block_call(node: &Node<'_>, block_name: &str) -> bool {
+    if let Some(call) = node.as_call_node()
+        && call.name().as_slice() == b"call"
+        && let Some(recv) = call.receiver()
+        && let Some(lv) = recv.as_local_variable_read_node()
+        && String::from_utf8_lossy(lv.name().as_slice()) == block_name
     {
         return true;
     }
     let mut found = false;
-    crate::ast_visitor::for_each_child(node, |child| {
-        if !found && node_contains_block_call(child, block_name) {
+    for_each_descendant(node, &mut |child| {
+        if !found && node_is_block_call(child, block_name) {
             found = true;
         }
     });
     found
 }
 
+fn node_is_block_call(node: &Node<'_>, block_name: &str) -> bool {
+    if let Some(call) = node.as_call_node()
+        && call.name().as_slice() == b"call"
+        && let Some(recv) = call.receiver()
+        && let Some(lv) = recv.as_local_variable_read_node()
+    {
+        return String::from_utf8_lossy(lv.name().as_slice()) == block_name;
+    }
+    false
+}
+
 /// `def name; @name; end` → use `attr_reader :name`.
-fn check_getter_vs_attr_reader(def: &Def, offenses: &mut Vec<Offense>) {
+fn check_getter_vs_attr_reader(def: &ruby_prism::DefNode<'_>, offenses: &mut Vec<Offense>) {
+    let def_name = String::from_utf8_lossy(def.name().as_slice()).to_string();
     // Must not be a setter (name ends with =)
-    if def.name.ends_with('=') {
+    if def_name.ends_with('=') {
         return;
     }
     // Must have 0 arguments
@@ -67,26 +82,32 @@ fn check_getter_vs_attr_reader(def: &Def, offenses: &mut Vec<Offense>) {
         return;
     }
     // Body must be a single ivar read matching @<method_name>
-    let exprs = body_expressions(&def.body);
-    if exprs.len() != 1 {
+    let body = def.body();
+    if body_expression_count(&body) != 1 {
         return;
     }
-    if let Node::Ivar(iv) = exprs[0] {
-        let expected_ivar = format!("@{}", def.name);
-        if iv.name == expected_ivar {
+    let single = body_first_expression(&body).or(body);
+    if let Some(iv) = single
+        .as_ref()
+        .and_then(|n| n.as_instance_variable_read_node())
+    {
+        let ivar_name = String::from_utf8_lossy(iv.name().as_slice()).to_string();
+        let expected_ivar = format!("@{}", def_name);
+        if ivar_name == expected_ivar {
             offenses.push(Offense::new(
                 OffenseKind::GetterVsAttrReader,
-                def.keyword_l.begin,
+                def.def_keyword_loc().start_offset(),
             ));
         }
     }
 }
 
 /// `def name=(value); @name = value; end` → use `attr_writer :name`.
-fn check_setter_vs_attr_writer(def: &Def, offenses: &mut Vec<Offense>) {
+fn check_setter_vs_attr_writer(def: &ruby_prism::DefNode<'_>, offenses: &mut Vec<Offense>) {
+    let def_name = String::from_utf8_lossy(def.name().as_slice()).to_string();
     // Must be a setter
-    let base_name = match def.name.strip_suffix('=') {
-        Some(n) => n,
+    let base_name = match def_name.strip_suffix('=') {
+        Some(n) => n.to_string(),
         None => return,
     };
     // Must have exactly 1 regular argument
@@ -98,22 +119,27 @@ fn check_setter_vs_attr_writer(def: &Def, offenses: &mut Vec<Offense>) {
         None => return,
     };
     // Body must be a single ivar assignment
-    let exprs = body_expressions(&def.body);
-    if exprs.len() != 1 {
+    let body = def.body();
+    if body_expression_count(&body) != 1 {
         return;
     }
-    if let Node::Ivasgn(ia) = exprs[0] {
+    let single = body_first_expression(&body).or(body);
+    if let Some(ia) = single
+        .as_ref()
+        .and_then(|n| n.as_instance_variable_write_node())
+    {
+        let ivar_name = String::from_utf8_lossy(ia.name().as_slice()).to_string();
         let expected_ivar = format!("@{}", base_name);
-        if ia.name != expected_ivar {
+        if ivar_name != expected_ivar {
             return;
         }
         // The assigned value must be the argument
-        if let Some(Node::Lvar(lv)) = ia.value.as_deref()
-            && lv.name == arg_name
+        if let Some(lv) = ia.value().as_local_variable_read_node()
+            && String::from_utf8_lossy(lv.name().as_slice()) == arg_name
         {
             offenses.push(Offense::new(
                 OffenseKind::SetterVsAttrWriter,
-                def.keyword_l.begin,
+                def.def_keyword_loc().start_offset(),
             ));
         }
     }
@@ -122,25 +148,23 @@ fn check_setter_vs_attr_writer(def: &Def, offenses: &mut Vec<Offense>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use crate::ast_visitor::node_children;
+    use crate::ast_visitor::for_each_direct_child;
 
     fn parse_and_scan(source: &[u8]) -> Vec<Offense> {
-        let result = lib_ruby_parser::Parser::new(source.to_vec(), Default::default()).do_parse();
+        let result = ruby_prism::parse(source);
+        let result = Box::leak(Box::new(result));
         let mut offenses = Vec::new();
-        if let Some(ast) = result.ast {
-            collect_def_offenses(&ast, &mut offenses);
-        }
+        collect_def_offenses(&result.node(), &mut offenses);
         offenses
     }
 
-    fn collect_def_offenses(node: &Node, offenses: &mut Vec<Offense>) {
-        if let Node::Def(d) = node {
-            offenses.extend(scan(d));
+    fn collect_def_offenses<'pr>(node: &Node<'pr>, offenses: &mut Vec<Offense>) {
+        if let Some(d) = node.as_def_node() {
+            offenses.extend(scan(&d));
         }
-        for child in node_children(node) {
+        for_each_direct_child(node, &mut |child| {
             collect_def_offenses(child, offenses);
-        }
+        });
     }
 
     #[test]
@@ -285,7 +309,6 @@ mod tests {
 
     #[test]
     fn setter_name_method_is_not_getter() {
-        // name= should not trigger getter check
         let offenses = parse_and_scan(b"def name=(v); @name = v; end");
         assert!(
             !offenses

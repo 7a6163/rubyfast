@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.3.0] - 2026-03-16
+
+### Changed
+
+- Migrate parser from `lib-ruby-parser` (Ruby 3.1.2) to `ruby-prism` (Ruby 3.3+)
+  - Support Ruby 3.2, 3.3, 3.4+ syntax
+  - Native handling of all encodings (ASCII, US-ASCII, etc.) — no custom decoder needed
+  - Error-tolerant parsing: always produces an AST, even with syntax errors
+  - Prism is Ruby's official default parser since 3.3
+
+### Removed
+
+- `lib-ruby-parser` dependency replaced by `ruby-prism`
+
 ## [1.2.5] - 2026-03-16
 
 ### Fixed

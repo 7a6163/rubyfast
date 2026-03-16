@@ -1,9 +1,5 @@
 use std::path::Path;
 
-use lib_ruby_parser::{ErrorLevel, Parser};
-
-use crate::ast_helpers::parser_options;
-
 /// A single byte-range replacement in a source file.
 #[derive(Debug, Clone)]
 pub struct Replacement {
@@ -80,11 +76,8 @@ pub fn apply_fixes(source: &[u8], fixes: &[Fix]) -> Vec<u8> {
 
 /// Verify that the given source parses without fatal errors.
 pub fn verify_syntax(source: &[u8]) -> bool {
-    let result = Parser::new(source.to_vec(), parser_options()).do_parse();
-    !result
-        .diagnostics
-        .iter()
-        .any(|d| d.level == ErrorLevel::Error)
+    let result = ruby_prism::parse(source);
+    result.errors().next().is_none()
 }
 
 /// Apply fixes to a file: read -> fix -> verify syntax -> write.
@@ -138,10 +131,6 @@ mod tests {
             Fix::single(2, 6, "XX"), // replace cdef with XX
             Fix::single(4, 8, "YY"), // overlaps — should be skipped
         ];
-        // Because we sort descending, 4..8 is processed first, then 2..6 overlaps
-        // Actually: sorted descending by start: 4..8 first (start=4), then 2..6 (start=2)
-        // 4..8 replaces "efgh" -> "YY", result = "abcdYY", last_start=4
-        // 2..6 has end=6 > last_start=4, so it's skipped
         let result = apply_fixes(source, &fixes);
         assert_eq!(result, b"abcdYY");
     }
@@ -159,7 +148,6 @@ mod tests {
     #[test]
     fn two_replacements_in_one_fix() {
         let source = b"arr.map { |x| [x] }.flatten(1)";
-        // Rename .map -> .flat_map and delete .flatten(1)
         let fix = Fix::two(
             4, 7, "flat_map", // "map" -> "flat_map"
             19, 30, "", // delete ".flatten(1)"
@@ -197,7 +185,6 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let file = dir.path().join("test.rb");
         std::fs::write(&file, "for x in [1]; end").unwrap();
-        // Replace "for x in [1]; " with "[1].each do |x|; "
         let fix = Fix::single(0, 14, "[1].each do |x|;");
         let result = apply_fixes_to_file(&file, &[fix]).unwrap();
         assert_eq!(result, 1);
@@ -208,7 +195,6 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let file = dir.path().join("test.rb");
         std::fs::write(&file, "x = 1 + 2").unwrap();
-        // This fix produces invalid syntax
         let fix = Fix::single(0, 9, "def def def");
         let result = apply_fixes_to_file(&file, &[fix]);
         assert!(result.is_err());
