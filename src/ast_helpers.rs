@@ -77,24 +77,18 @@ pub fn is_single_char_string(node: &Node<'_>) -> bool {
 /// Check if the receiver is a range (RangeNode, inclusive or exclusive).
 /// Also handles parenthesized ranges: `(1..10)` parses as `ParenthesesNode(RangeNode)`.
 pub fn receiver_is_range(recv: &Option<Node<'_>>) -> bool {
-    match recv {
-        Some(node) => {
-            if node.as_range_node().is_some() {
-                return true;
-            }
-            if let Some(paren) = node.as_parentheses_node()
-                && let Some(body) = paren.body()
-            {
-                if let Some(stmts) = body.as_statements_node() {
-                    let body_nodes: Vec<_> = stmts.body().iter().collect();
-                    return body_nodes.len() == 1 && body_nodes[0].as_range_node().is_some();
-                }
-                return body.as_range_node().is_some();
-            }
-            false
-        }
-        None => false,
+    let Some(node) = recv else { return false };
+    if node.as_range_node().is_some() {
+        return true;
     }
+    let Some(paren) = node.as_parentheses_node() else {
+        return false;
+    };
+    let Some(body) = paren.body() else {
+        return false;
+    };
+    body_single_expression(Some(body))
+        .is_some_and(|expr| expr.as_range_node().is_some())
 }
 
 /// Check if a node is a literal/primitive (not a variable reference or method call).
@@ -556,6 +550,170 @@ mod tests {
     #[test]
     fn body_single_expression_none_for_empty() {
         assert!(body_single_expression(None).is_none());
+    }
+
+    #[test]
+    fn has_full_block_works() {
+        let node = parse_first_stmt(b"arr.map { |x| x }");
+        let call = node.as_call_node().unwrap();
+        assert!(has_full_block(&call));
+    }
+
+    #[test]
+    fn has_full_block_without() {
+        let node = parse_first_stmt(b"arr.map(&:to_s)");
+        let call = node.as_call_node().unwrap();
+        assert!(!has_full_block(&call));
+    }
+
+    #[test]
+    fn first_call_arg_some() {
+        let node = parse_first_stmt(b"foo(42)");
+        let call = node.as_call_node().unwrap();
+        let arg = first_call_arg(&call);
+        assert!(arg.is_some());
+    }
+
+    #[test]
+    fn first_call_arg_none() {
+        let node = parse_first_stmt(b"foo()");
+        let call = node.as_call_node().unwrap();
+        let arg = first_call_arg(&call);
+        assert!(arg.is_none());
+    }
+
+    #[test]
+    fn call_args_pair_exactly_two() {
+        let node = parse_first_stmt(b"foo(1, 2)");
+        let call = node.as_call_node().unwrap();
+        let pair = call_args_pair(&call);
+        assert!(pair.is_some());
+    }
+
+    #[test]
+    fn call_args_pair_one_arg() {
+        let node = parse_first_stmt(b"foo(1)");
+        let call = node.as_call_node().unwrap();
+        assert!(call_args_pair(&call).is_none());
+    }
+
+    #[test]
+    fn call_args_pair_three_args() {
+        let node = parse_first_stmt(b"foo(1, 2, 3)");
+        let call = node.as_call_node().unwrap();
+        assert!(call_args_pair(&call).is_none());
+    }
+
+    #[test]
+    fn call_args_pair_no_args() {
+        let node = parse_first_stmt(b"foo()");
+        let call = node.as_call_node().unwrap();
+        assert!(call_args_pair(&call).is_none());
+    }
+
+    #[test]
+    fn receiver_is_range_none() {
+        assert!(!receiver_is_range(&None));
+    }
+
+    #[test]
+    fn is_primitive_rational() {
+        assert!(is_primitive(&parse_first_stmt(b"3r")));
+    }
+
+    #[test]
+    fn is_primitive_imaginary() {
+        assert!(is_primitive(&parse_first_stmt(b"1i")));
+    }
+
+    #[test]
+    fn first_arg_is_single_pair_hash_no_arg() {
+        let node = parse_first_stmt(b"h.merge!()");
+        let call = node.as_call_node().unwrap();
+        assert!(!first_arg_is_single_pair_hash(&call));
+    }
+
+    #[test]
+    fn is_int_one_hex() {
+        assert!(is_int_one(&parse_first_stmt(b"0x1")));
+    }
+
+    #[test]
+    fn is_int_one_binary() {
+        assert!(is_int_one(&parse_first_stmt(b"0b1")));
+    }
+
+    #[test]
+    fn is_int_one_octal() {
+        assert!(is_int_one(&parse_first_stmt(b"0o1")));
+    }
+
+    #[test]
+    fn block_arg_names_multiple() {
+        let node = parse_first_stmt(b"arr.each_with_object([]) { |x, acc| x }");
+        let call = node.as_call_node().unwrap();
+        if let Some(ruby_prism::Node::BlockNode { .. }) = call.block() {
+            let block = call.block().unwrap().as_block_node().unwrap();
+            let names = block_arg_names(&block.parameters());
+            assert_eq!(names.len(), 2);
+        }
+    }
+
+    #[test]
+    fn block_arg_names_numbered_params() {
+        // Numbered parameters (_1) produce NumberedParametersNode, not BlockParametersNode
+        let node = parse_first_stmt(b"arr.map { _1.to_s }");
+        let call = node.as_call_node().unwrap();
+        if let Some(ruby_prism::Node::BlockNode { .. }) = call.block() {
+            let block = call.block().unwrap().as_block_node().unwrap();
+            let names = block_arg_names(&block.parameters());
+            assert!(names.is_empty());
+        }
+    }
+
+    #[test]
+    fn str_contains_def_in_interpolated_string() {
+        let node = parse_first_stmt(b"\"prefix def foo #{x} end\"");
+        assert!(str_contains_def(&node));
+    }
+
+    #[test]
+    fn str_contains_def_interpolated_no_def() {
+        let node = parse_first_stmt(b"\"prefix #{x} suffix\"");
+        assert!(!str_contains_def(&node));
+    }
+
+    #[test]
+    fn arg_count_no_args() {
+        let node = parse_first_stmt(b"arr.map");
+        let call = node.as_call_node().unwrap();
+        assert_eq!(arg_count(&call), 0);
+    }
+
+    #[test]
+    fn receiver_as_call_non_call_recv() {
+        let node = parse_first_stmt(b"42.to_s");
+        let call = node.as_call_node().unwrap();
+        let recv = call.receiver();
+        assert!(receiver_as_call(&recv).is_none());
+    }
+
+    #[test]
+    fn body_expression_count_endless_method() {
+        // Endless method: `def foo = 42` — body is a single IntegerNode, not StatementsNode
+        let node = parse_first_stmt(b"def foo = 42");
+        let def = node.as_def_node().unwrap();
+        assert_eq!(body_expression_count(&def.body()), 1);
+    }
+
+    #[test]
+    fn body_single_expression_endless_method() {
+        // Endless method body is not a StatementsNode
+        let node = parse_first_stmt(b"def foo = 42");
+        let def = node.as_def_node().unwrap();
+        let single = body_single_expression(def.body());
+        assert!(single.is_some());
+        assert!(single.unwrap().as_integer_node().is_some());
     }
 
     #[test]

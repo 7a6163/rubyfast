@@ -348,6 +348,13 @@ mod tests {
     }
 
     #[test]
+    fn empty_disable_next_line_directive_ignored() {
+        let source = "# rubyfast:disable-next-line\nx = [].shuffle.first\n";
+        let set = parse_and_build(source);
+        assert!(!set.is_disabled(2, OffenseKind::ShuffleFirstVsSample));
+    }
+
+    #[test]
     fn empty_enable_directive_ignored() {
         let source = "# rubyfast:enable\n";
         let set = parse_and_build(source);

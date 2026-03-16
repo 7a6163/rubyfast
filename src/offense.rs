@@ -163,6 +163,10 @@ impl Offense {
             fix: Some(fix),
         }
     }
+
+    pub fn with_optional_fix(kind: OffenseKind, line: usize, fix: Option<Fix>) -> Self {
+        Self { kind, line, fix }
+    }
 }
 
 #[cfg(test)]
@@ -208,6 +212,19 @@ mod tests {
         let offense = Offense::new(OffenseKind::GsubVsTr, 42);
         assert_eq!(offense.kind, OffenseKind::GsubVsTr);
         assert_eq!(offense.line, 42);
+        assert!(offense.fix.is_none());
+    }
+
+    #[test]
+    fn offense_with_optional_fix_some() {
+        let fix = Fix::single(0, 5, "hello");
+        let offense = Offense::with_optional_fix(OffenseKind::GsubVsTr, 1, Some(fix));
+        assert!(offense.fix.is_some());
+    }
+
+    #[test]
+    fn offense_with_optional_fix_none() {
+        let offense = Offense::with_optional_fix(OffenseKind::GsubVsTr, 1, None);
         assert!(offense.fix.is_none());
     }
 

@@ -60,28 +60,24 @@ pub fn scan_call_on_block_call(
 
     // .select{}.first → .detect{}
     if outer_name == b"first" && recv_name == b"select" && arg_count(outer) == 0 {
-        let offense = match (recv_call.message_loc(), outer.call_operator_loc()) {
-            (Some(sel_l), Some(dot_l)) => {
-                let fix = Fix::two(
+        let fix = recv_call
+            .message_loc()
+            .zip(outer.call_operator_loc())
+            .map(|(sel_l, dot_l)| {
+                Fix::two(
                     sel_l.start_offset(),
                     sel_l.end_offset(),
                     "detect",
                     dot_l.start_offset(),
                     outer.location().end_offset(),
                     "",
-                );
-                Offense::with_fix(
-                    OffenseKind::SelectFirstVsDetect,
-                    outer.location().start_offset(),
-                    fix,
                 )
-            }
-            _ => Offense::new(
-                OffenseKind::SelectFirstVsDetect,
-                outer.location().start_offset(),
-            ),
-        };
-        offenses.push(offense);
+            });
+        offenses.push(Offense::with_optional_fix(
+            OffenseKind::SelectFirstVsDetect,
+            outer.location().start_offset(),
+            fix,
+        ));
     }
 
     // .select{}.last (no auto-fix)
@@ -99,28 +95,24 @@ pub fn scan_call_on_block_call(
         && arg_count(outer) == 1
         && is_int_one(&arg)
     {
-        let offense = match (recv_call.message_loc(), outer.call_operator_loc()) {
-            (Some(sel_l), Some(dot_l)) => {
-                let fix = Fix::two(
+        let fix = recv_call
+            .message_loc()
+            .zip(outer.call_operator_loc())
+            .map(|(sel_l, dot_l)| {
+                Fix::two(
                     sel_l.start_offset(),
                     sel_l.end_offset(),
                     "flat_map",
                     dot_l.start_offset(),
                     outer.location().end_offset(),
                     "",
-                );
-                Offense::with_fix(
-                    OffenseKind::MapFlattenVsFlatMap,
-                    outer.location().start_offset(),
-                    fix,
                 )
-            }
-            _ => Offense::new(
-                OffenseKind::MapFlattenVsFlatMap,
-                outer.location().start_offset(),
-            ),
-        };
-        offenses.push(offense);
+            });
+        offenses.push(Offense::with_optional_fix(
+            OffenseKind::MapFlattenVsFlatMap,
+            outer.location().start_offset(),
+            fix,
+        ));
     }
 
     offenses
@@ -135,25 +127,20 @@ fn check_shuffle_first(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offen
     {
         return;
     }
-    let offense = match receiver_as_call(&call.receiver()).and_then(|rs| rs.call_operator_loc()) {
-        Some(dot_l) => {
-            let fix = Fix::single(
+    let fix = receiver_as_call(&call.receiver())
+        .and_then(|rs| rs.call_operator_loc())
+        .map(|dot_l| {
+            Fix::single(
                 dot_l.start_offset(),
                 call.location().end_offset(),
                 ".sample",
-            );
-            Offense::with_fix(
-                OffenseKind::ShuffleFirstVsSample,
-                call.location().start_offset(),
-                fix,
             )
-        }
-        None => Offense::new(
-            OffenseKind::ShuffleFirstVsSample,
-            call.location().start_offset(),
-        ),
-    };
-    offenses.push(offense);
+        });
+    offenses.push(Offense::with_optional_fix(
+        OffenseKind::ShuffleFirstVsSample,
+        call.location().start_offset(),
+        fix,
+    ));
 }
 
 /// `.reverse.each` → `.reverse_each`
@@ -163,24 +150,17 @@ fn check_reverse_each(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offens
     {
         return;
     }
-    let offense = match (
-        receiver_as_call(&call.receiver()).and_then(|rs| rs.call_operator_loc()),
-        call.message_loc(),
-    ) {
-        (Some(dot_l), Some(sel_l)) => {
-            let fix = Fix::single(dot_l.start_offset(), sel_l.end_offset(), ".reverse_each");
-            Offense::with_fix(
-                OffenseKind::ReverseEachVsReverseEach,
-                call.location().start_offset(),
-                fix,
-            )
-        }
-        _ => Offense::new(
-            OffenseKind::ReverseEachVsReverseEach,
-            call.location().start_offset(),
-        ),
-    };
-    offenses.push(offense);
+    let fix = receiver_as_call(&call.receiver())
+        .and_then(|rs| rs.call_operator_loc())
+        .zip(call.message_loc())
+        .map(|(dot_l, sel_l)| {
+            Fix::single(dot_l.start_offset(), sel_l.end_offset(), ".reverse_each")
+        });
+    offenses.push(Offense::with_optional_fix(
+        OffenseKind::ReverseEachVsReverseEach,
+        call.location().start_offset(),
+        fix,
+    ));
 }
 
 /// `.keys.each` → `.each_key` (keys must have 0 args)
@@ -192,21 +172,17 @@ fn check_keys_each(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offense>)
         && recv_call.name().as_slice() == b"keys"
         && arg_count(&recv_call) == 0
     {
-        let offense = match (recv_call.call_operator_loc(), call.message_loc()) {
-            (Some(dot_l), Some(sel_l)) => {
-                let fix = Fix::single(dot_l.start_offset(), sel_l.end_offset(), ".each_key");
-                Offense::with_fix(
-                    OffenseKind::KeysEachVsEachKey,
-                    call.location().start_offset(),
-                    fix,
-                )
-            }
-            _ => Offense::new(
-                OffenseKind::KeysEachVsEachKey,
-                call.location().start_offset(),
-            ),
-        };
-        offenses.push(offense);
+        let fix = recv_call
+            .call_operator_loc()
+            .zip(call.message_loc())
+            .map(|(dot_l, sel_l)| {
+                Fix::single(dot_l.start_offset(), sel_l.end_offset(), ".each_key")
+            });
+        offenses.push(Offense::with_optional_fix(
+            OffenseKind::KeysEachVsEachKey,
+            call.location().start_offset(),
+            fix,
+        ));
     }
 }
 
@@ -219,28 +195,24 @@ fn check_select_first(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offens
         && recv_call.name().as_slice() == b"select"
         && has_block_pass(&recv_call)
     {
-        let offense = match (recv_call.message_loc(), call.call_operator_loc()) {
-            (Some(sel_l), Some(dot_l)) => {
-                let fix = Fix::two(
+        let fix = recv_call
+            .message_loc()
+            .zip(call.call_operator_loc())
+            .map(|(sel_l, dot_l)| {
+                Fix::two(
                     sel_l.start_offset(),
                     sel_l.end_offset(),
                     "detect",
                     dot_l.start_offset(),
                     call.location().end_offset(),
                     "",
-                );
-                Offense::with_fix(
-                    OffenseKind::SelectFirstVsDetect,
-                    call.location().start_offset(),
-                    fix,
                 )
-            }
-            _ => Offense::new(
-                OffenseKind::SelectFirstVsDetect,
-                call.location().start_offset(),
-            ),
-        };
-        offenses.push(offense);
+            });
+        offenses.push(Offense::with_optional_fix(
+            OffenseKind::SelectFirstVsDetect,
+            call.location().start_offset(),
+            fix,
+        ));
     }
 }
 
@@ -299,21 +271,14 @@ fn check_include_vs_cover(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Of
     if call.name().as_slice() != b"include?" || !receiver_is_range(&call.receiver()) {
         return;
     }
-    let offense = match call.message_loc() {
-        Some(sel_l) => {
-            let fix = Fix::single(sel_l.start_offset(), sel_l.end_offset(), "cover?");
-            Offense::with_fix(
-                OffenseKind::IncludeVsCoverOnRange,
-                call.location().start_offset(),
-                fix,
-            )
-        }
-        None => Offense::new(
-            OffenseKind::IncludeVsCoverOnRange,
-            call.location().start_offset(),
-        ),
-    };
-    offenses.push(offense);
+    let fix = call
+        .message_loc()
+        .map(|sel_l| Fix::single(sel_l.start_offset(), sel_l.end_offset(), "cover?"));
+    offenses.push(Offense::with_optional_fix(
+        OffenseKind::IncludeVsCoverOnRange,
+        call.location().start_offset(),
+        fix,
+    ));
 }
 
 /// `.gsub("x", "y")` → `.tr("x", "y")` when both args are single-char strings
@@ -325,14 +290,14 @@ fn check_gsub_vs_tr(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offense>
         return;
     };
     if is_single_char_string(&first) && is_single_char_string(&second) {
-        let offense = match call.message_loc() {
-            Some(sel_l) => {
-                let fix = Fix::single(sel_l.start_offset(), sel_l.end_offset(), "tr");
-                Offense::with_fix(OffenseKind::GsubVsTr, call.location().start_offset(), fix)
-            }
-            None => Offense::new(OffenseKind::GsubVsTr, call.location().start_offset()),
-        };
-        offenses.push(offense);
+        let fix = call
+            .message_loc()
+            .map(|sel_l| Fix::single(sel_l.start_offset(), sel_l.end_offset(), "tr"));
+        offenses.push(Offense::with_optional_fix(
+            OffenseKind::GsubVsTr,
+            call.location().start_offset(),
+            fix,
+        ));
     }
 }
 
@@ -405,21 +370,10 @@ fn check_block_vs_symbol_to_proc(
     }
     let block_arg_name = &arg_names[0];
 
-    // Block body must be a single CallNode
-    let body = match block.body() {
+    // Block body must be a single expression
+    let inner_node = match crate::ast_helpers::body_single_expression(block.body()) {
         Some(node) => node,
         None => return,
-    };
-
-    // If body is a StatementsNode with a single statement, unwrap it
-    let inner_node = if let Some(stmts) = body.as_statements_node() {
-        let body_nodes: Vec<_> = stmts.body().iter().collect();
-        if body_nodes.len() != 1 {
-            return;
-        }
-        body_nodes.into_iter().next().unwrap()
-    } else {
-        body
     };
 
     let inner_call = match inner_node.as_call_node() {
@@ -863,6 +817,130 @@ mod tests {
         assert!(
             o.iter()
                 .any(|x| x.kind == OffenseKind::EachWithIndexVsWhile)
+        );
+    }
+
+    #[test]
+    fn map_flatten_with_block_pass() {
+        let o = parse_and_collect(b"arr.map(&:to_a).flatten(1)");
+        assert!(o.iter().any(|x| x.kind == OffenseKind::MapFlattenVsFlatMap));
+    }
+
+    #[test]
+    fn map_flatten_with_full_block_fires_via_chain() {
+        let o = parse_and_collect(b"arr.map { |x| [x] }.flatten(1)");
+        assert!(o.iter().any(|x| x.kind == OffenseKind::MapFlattenVsFlatMap));
+    }
+
+    #[test]
+    fn map_flatten_no_flatten_arg_via_chain_no_fire() {
+        let o = parse_and_collect(b"arr.map { |x| [x] }.flatten");
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::MapFlattenVsFlatMap));
+    }
+
+    #[test]
+    fn reverse_each_with_block() {
+        let o = parse_and_collect(b"arr.reverse.each { |x| puts x }");
+        assert!(
+            o.iter()
+                .any(|x| x.kind == OffenseKind::ReverseEachVsReverseEach)
+        );
+    }
+
+    #[test]
+    fn gsub_with_block_single_chars() {
+        let o = parse_and_collect(b"s.gsub('r', 'k') { |m| m }");
+        // gsub with single chars still fires even with block (scan_call_with_block calls check_gsub_vs_tr)
+        assert!(o.iter().any(|x| x.kind == OffenseKind::GsubVsTr));
+    }
+
+    #[test]
+    fn each_with_index_with_block() {
+        let o = parse_and_collect(b"arr.each_with_index { |item, idx| puts idx }");
+        assert!(
+            o.iter()
+                .any(|x| x.kind == OffenseKind::EachWithIndexVsWhile)
+        );
+    }
+
+    #[test]
+    fn include_on_range_with_block() {
+        // include? on range fires via scan_call_with_block path too
+        let o = parse_and_collect(b"(1..10).include?(5)");
+        assert!(
+            o.iter()
+                .any(|x| x.kind == OffenseKind::IncludeVsCoverOnRange)
+        );
+    }
+
+    #[test]
+    fn shuffle_first_with_block() {
+        let o = parse_and_collect(b"[].shuffle.first { 0 }");
+        assert!(
+            o.iter()
+                .any(|x| x.kind == OffenseKind::ShuffleFirstVsSample)
+        );
+    }
+
+    #[test]
+    fn keys_each_with_block() {
+        let o = parse_and_collect(b"h.keys.each { |k| puts k }");
+        assert!(o.iter().any(|x| x.kind == OffenseKind::KeysEachVsEachKey));
+    }
+
+    #[test]
+    fn hash_merge_bang_with_block() {
+        let o = parse_and_collect(b"h.merge!(item: 1) { |k, v1, v2| v1 }");
+        assert!(
+            o.iter()
+                .any(|x| x.kind == OffenseKind::HashMergeBangVsHashBrackets)
+        );
+    }
+
+    #[test]
+    fn module_eval_with_block_and_def_string() {
+        // module_eval with a def string arg AND a block should fire (scan_call_with_block checks module_eval)
+        let o = parse_and_collect(b"klass.module_eval(\"def foo; end\") { }");
+        assert!(o.iter().any(|x| x.kind == OffenseKind::ModuleEval));
+    }
+
+    #[test]
+    fn block_multiple_body_stmts_no_symbol_to_proc() {
+        // Block with 1 arg but multiple statements in body → early return
+        let o = parse_and_collect(b"arr.map { |x| puts x; x.to_s }");
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::BlockVsSymbolToProc));
+    }
+
+    #[test]
+    fn block_no_params_no_symbol_to_proc() {
+        let o = parse_and_collect(b"arr.map { 42 }");
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::BlockVsSymbolToProc));
+    }
+
+    #[test]
+    fn block_body_not_call_no_symbol_to_proc() {
+        let o = parse_and_collect(b"arr.map { |x| x }");
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::BlockVsSymbolToProc));
+    }
+
+    #[test]
+    fn block_inner_call_has_block_no_symbol_to_proc() {
+        let o = parse_and_collect(b"arr.map { |x| x.foo { 1 } }");
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::BlockVsSymbolToProc));
+    }
+
+    #[test]
+    fn block_inner_call_no_receiver_no_symbol_to_proc() {
+        let o = parse_and_collect(b"arr.map { |x| puts }");
+        assert!(!o.iter().any(|x| x.kind == OffenseKind::BlockVsSymbolToProc));
+    }
+
+    #[test]
+    fn select_last_via_chain_with_args_no_fire() {
+        let o = parse_and_collect(b"arr.select { |x| x }.last(3)");
+        assert!(
+            !o.iter()
+                .any(|x| x.kind == OffenseKind::SelectLastVsReverseDetect)
         );
     }
 

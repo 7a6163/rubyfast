@@ -288,6 +288,125 @@ mod tests {
     }
 
     #[test]
+    fn walk_node_call_on_block_call_chain() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("test.rb");
+        std::fs::write(&file, "arr.select { |x| x > 1 }.first").unwrap();
+        let config = crate::config::Config::default();
+        let result = super::analyze_file(&file, &config).unwrap();
+        assert!(
+            result
+                .offenses
+                .iter()
+                .any(|o| o.kind == crate::offense::OffenseKind::SelectFirstVsDetect)
+        );
+    }
+
+    #[test]
+    fn walk_node_rescue_clause() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("test.rb");
+        std::fs::write(
+            &file,
+            "begin\n  foo\nrescue NoMethodError\n  bar\nrescue => e\n  baz\nend\n",
+        )
+        .unwrap();
+        let config = crate::config::Config::default();
+        let result = super::analyze_file(&file, &config).unwrap();
+        assert!(
+            result
+                .offenses
+                .iter()
+                .any(|o| o.kind == crate::offense::OffenseKind::RescueVsRespondTo)
+        );
+    }
+
+    #[test]
+    fn walk_node_begin_else_ensure() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("test.rb");
+        std::fs::write(
+            &file,
+            "begin\n  for x in [1]; end\nrescue\n  1\nelse\n  for y in [2]; end\nensure\n  for z in [3]; end\nend\n",
+        )
+        .unwrap();
+        let config = crate::config::Config::default();
+        let result = super::analyze_file(&file, &config).unwrap();
+        // Should find for_loop offenses in the body, else, and ensure clauses
+        let for_count = result
+            .offenses
+            .iter()
+            .filter(|o| o.kind == crate::offense::OffenseKind::ForLoopVsEach)
+            .count();
+        assert!(for_count >= 2, "Expected at least 2 for_loop offenses in begin/else/ensure, got {}", for_count);
+    }
+
+    #[test]
+    fn walk_node_call_without_block() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("test.rb");
+        std::fs::write(&file, "h.fetch(:key, [])").unwrap();
+        let config = crate::config::Config::default();
+        let result = super::analyze_file(&file, &config).unwrap();
+        assert!(
+            result
+                .offenses
+                .iter()
+                .any(|o| o.kind == crate::offense::OffenseKind::FetchWithArgumentVsBlock)
+        );
+    }
+
+    #[test]
+    fn walk_node_call_with_block_argument() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("test.rb");
+        std::fs::write(&file, "arr.select(&:odd?).first").unwrap();
+        let config = crate::config::Config::default();
+        let result = super::analyze_file(&file, &config).unwrap();
+        assert!(
+            result
+                .offenses
+                .iter()
+                .any(|o| o.kind == crate::offense::OffenseKind::SelectFirstVsDetect)
+        );
+    }
+
+    #[test]
+    fn walk_node_standalone_rescue_node() {
+        // Test inline rescue which creates RescueNode not inside BeginNode
+        // `def foo; bar rescue NoMethodError; end` should hit the RescueNode branch
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("test.rb");
+        std::fs::write(
+            &file,
+            "def foo\n  bar rescue NoMethodError\nend\n",
+        )
+        .unwrap();
+        let config = crate::config::Config::default();
+        let _result = super::analyze_file(&file, &config).unwrap();
+        // Just ensuring the code path doesn't panic
+    }
+
+    #[test]
+    fn walk_node_deeply_nested() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("test.rb");
+        std::fs::write(
+            &file,
+            "class Foo\n  module Bar\n    def baz\n      if true\n        for x in [1]; end\n      end\n    end\n  end\nend\n",
+        )
+        .unwrap();
+        let config = crate::config::Config::default();
+        let result = super::analyze_file(&file, &config).unwrap();
+        assert!(
+            result
+                .offenses
+                .iter()
+                .any(|o| o.kind == crate::offense::OffenseKind::ForLoopVsEach)
+        );
+    }
+
+    #[test]
     fn walk_node_nested_for_inside_method() {
         let dir = tempfile::TempDir::new().unwrap();
         let file = dir.path().join("test.rb");

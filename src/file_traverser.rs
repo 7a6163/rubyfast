@@ -266,6 +266,21 @@ mod tests {
     }
 
     #[test]
+    fn traverse_and_analyze_unreadable_file() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("unreadable.rb");
+        // Create a symlink to a nonexistent target to simulate unreadable file
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("/nonexistent_target_12345", &file).unwrap();
+            let config = Config::default();
+            let result = traverse_and_analyze(dir.path(), &config);
+            assert_eq!(result.files_inspected, 1);
+            assert!(!result.parse_errors.is_empty());
+        }
+    }
+
+    #[test]
     fn traverse_and_analyze_parse_error() {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("bad.rb"), "def def def").unwrap();

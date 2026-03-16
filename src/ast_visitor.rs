@@ -658,6 +658,749 @@ mod tests {
     }
 
     #[test]
+    fn visitor_handles_unless_node() {
+        let result = leak_parse(b"unless false; 1; else; 2; end");
+        assert!(count_all_nodes(&result.node()) > 3);
+    }
+
+    #[test]
+    fn visitor_handles_until_node() {
+        let result = leak_parse(b"until false; 1; end");
+        assert!(count_all_nodes(&result.node()) > 2);
+    }
+
+    #[test]
+    fn visitor_handles_case_match_node() {
+        let result = leak_parse(b"case x; in Integer => i; 1; in String; 2; else; 3; end");
+        assert!(count_all_nodes(&result.node()) > 4);
+    }
+
+    #[test]
+    fn visitor_handles_match_predicate_node() {
+        let result = leak_parse(b"x in [1, 2]");
+        assert!(count_all_nodes(&result.node()) > 2);
+    }
+
+    #[test]
+    fn visitor_handles_match_required_node() {
+        let result = leak_parse(b"x => y");
+        assert!(count_all_nodes(&result.node()) > 2);
+    }
+
+    #[test]
+    fn visitor_handles_multi_write_node() {
+        let result = leak_parse(b"a, b, *c, d = 1, 2, 3, 4");
+        assert!(count_all_nodes(&result.node()) > 4);
+    }
+
+    #[test]
+    fn visitor_handles_splat_node() {
+        let result = leak_parse(b"a, *b = [1, 2, 3]");
+        assert!(count_all_nodes(&result.node()) > 3);
+    }
+
+    #[test]
+    fn visitor_handles_class_variable_write() {
+        let result = leak_parse(b"@@x = 1");
+        assert!(count_all_nodes(&result.node()) > 1);
+    }
+
+    #[test]
+    fn visitor_handles_global_variable_write() {
+        let result = leak_parse(b"$x = 1");
+        assert!(count_all_nodes(&result.node()) > 1);
+    }
+
+    #[test]
+    fn visitor_handles_constant_path_write() {
+        let result = leak_parse(b"Foo::BAR = 1");
+        assert!(count_all_nodes(&result.node()) > 1);
+    }
+
+    #[test]
+    fn visitor_handles_constant_path_node() {
+        let result = leak_parse(b"Foo::Bar::Baz");
+        assert!(count_all_nodes(&result.node()) > 1);
+    }
+
+    #[test]
+    fn visitor_handles_alias_global_variable() {
+        let result = leak_parse(b"alias $new $old");
+        assert!(count_all_nodes(&result.node()) > 1);
+    }
+
+    #[test]
+    fn visitor_handles_undef_node() {
+        let result = leak_parse(b"undef :foo, :bar");
+        assert!(count_all_nodes(&result.node()) > 1);
+    }
+
+    #[test]
+    fn visitor_handles_local_variable_and_write() {
+        let result = leak_parse(b"x = 1; x &&= 2");
+        assert!(count_all_nodes(&result.node()) > 2);
+    }
+
+    #[test]
+    fn visitor_handles_local_variable_or_write() {
+        let result = leak_parse(b"x = 1; x ||= 2");
+        assert!(count_all_nodes(&result.node()) > 2);
+    }
+
+    #[test]
+    fn visitor_handles_instance_variable_operator_write() {
+        let result = leak_parse(b"@x += 1");
+        assert!(count_all_nodes(&result.node()) > 1);
+    }
+
+    #[test]
+    fn visitor_handles_instance_variable_and_write() {
+        let result = leak_parse(b"@x &&= 1");
+        assert!(count_all_nodes(&result.node()) > 1);
+    }
+
+    #[test]
+    fn visitor_handles_instance_variable_or_write() {
+        let result = leak_parse(b"@x ||= 1");
+        assert!(count_all_nodes(&result.node()) > 1);
+    }
+
+    #[test]
+    fn visitor_handles_constant_operator_write() {
+        let result = leak_parse(b"FOO += 1");
+        assert!(count_all_nodes(&result.node()) > 1);
+    }
+
+    #[test]
+    fn visitor_handles_constant_and_write() {
+        let result = leak_parse(b"FOO &&= 1");
+        assert!(count_all_nodes(&result.node()) > 1);
+    }
+
+    #[test]
+    fn visitor_handles_constant_or_write() {
+        let result = leak_parse(b"FOO ||= 1");
+        assert!(count_all_nodes(&result.node()) > 1);
+    }
+
+    #[test]
+    fn visitor_handles_constant_path_operator_write() {
+        let result = leak_parse(b"Foo::BAR += 1");
+        assert!(count_all_nodes(&result.node()) > 1);
+    }
+
+    #[test]
+    fn visitor_handles_constant_path_and_write() {
+        let result = leak_parse(b"Foo::BAR &&= 1");
+        assert!(count_all_nodes(&result.node()) > 1);
+    }
+
+    #[test]
+    fn visitor_handles_constant_path_or_write() {
+        let result = leak_parse(b"Foo::BAR ||= 1");
+        assert!(count_all_nodes(&result.node()) > 1);
+    }
+
+    #[test]
+    fn visitor_handles_class_variable_operator_write() {
+        let result = leak_parse(b"@@x += 1");
+        assert!(count_all_nodes(&result.node()) > 1);
+    }
+
+    #[test]
+    fn visitor_handles_class_variable_and_write() {
+        let result = leak_parse(b"@@x &&= 1");
+        assert!(count_all_nodes(&result.node()) > 1);
+    }
+
+    #[test]
+    fn visitor_handles_class_variable_or_write() {
+        let result = leak_parse(b"@@x ||= 1");
+        assert!(count_all_nodes(&result.node()) > 1);
+    }
+
+    #[test]
+    fn visitor_handles_global_variable_operator_write() {
+        let result = leak_parse(b"$x += 1");
+        assert!(count_all_nodes(&result.node()) > 1);
+    }
+
+    #[test]
+    fn visitor_handles_global_variable_and_write() {
+        let result = leak_parse(b"$x &&= 1");
+        assert!(count_all_nodes(&result.node()) > 1);
+    }
+
+    #[test]
+    fn visitor_handles_global_variable_or_write() {
+        let result = leak_parse(b"$x ||= 1");
+        assert!(count_all_nodes(&result.node()) > 1);
+    }
+
+    #[test]
+    fn visitor_handles_index_operator_write() {
+        let result = leak_parse(b"a[0] += 1");
+        assert!(count_all_nodes(&result.node()) > 2);
+    }
+
+    #[test]
+    fn visitor_handles_index_and_write() {
+        let result = leak_parse(b"a[0] &&= 1");
+        assert!(count_all_nodes(&result.node()) > 2);
+    }
+
+    #[test]
+    fn visitor_handles_index_or_write() {
+        let result = leak_parse(b"a[0] ||= 1");
+        assert!(count_all_nodes(&result.node()) > 2);
+    }
+
+    #[test]
+    fn visitor_handles_interpolated_symbol() {
+        let result = leak_parse(b":\"foo#{bar}\"");
+        assert!(count_all_nodes(&result.node()) > 1);
+    }
+
+    #[test]
+    fn visitor_handles_interpolated_regex() {
+        let result = leak_parse(b"/foo#{bar}/");
+        assert!(count_all_nodes(&result.node()) > 1);
+    }
+
+    #[test]
+    fn visitor_handles_embedded_statements() {
+        let result = leak_parse(b"\"hello #{1 + 2} world\"");
+        assert!(count_all_nodes(&result.node()) > 3);
+    }
+
+    #[test]
+    fn visitor_handles_parentheses_node() {
+        let result = leak_parse(b"(1 + 2)");
+        assert!(count_all_nodes(&result.node()) > 2);
+    }
+
+    #[test]
+    fn visitor_handles_keyword_hash_node() {
+        let result = leak_parse(b"foo(a: 1, b: 2)");
+        assert!(count_all_nodes(&result.node()) > 3);
+    }
+
+    #[test]
+    fn visitor_handles_assoc_splat_node() {
+        let result = leak_parse(b"{**opts}");
+        assert!(count_all_nodes(&result.node()) > 1);
+    }
+
+    #[test]
+    fn visitor_handles_next_node() {
+        let result = leak_parse(b"loop { next 1 }");
+        assert!(count_all_nodes(&result.node()) > 2);
+    }
+
+    #[test]
+    fn visitor_handles_break_with_value() {
+        let result = leak_parse(b"loop { break 42 }");
+        assert!(count_all_nodes(&result.node()) > 2);
+    }
+
+    #[test]
+    fn visitor_handles_super_with_block() {
+        let result = leak_parse(b"def foo; super(1) { |x| x }; end");
+        assert!(count_all_nodes(&result.node()) > 4);
+    }
+
+    #[test]
+    fn visitor_handles_when_node() {
+        let result = leak_parse(b"case x; when 1, 2; 'a'; when 3; 'b'; end");
+        assert!(count_all_nodes(&result.node()) > 5);
+    }
+
+    #[test]
+    fn visitor_handles_rescue_node_standalone() {
+        let result = leak_parse(b"begin; 1; rescue => e; 2; end");
+        assert!(count_all_nodes(&result.node()) > 3);
+    }
+
+    #[test]
+    fn visitor_handles_else_node() {
+        let result = leak_parse(b"if true; 1; else; 2; end");
+        assert!(count_all_nodes(&result.node()) > 3);
+    }
+
+    #[test]
+    fn visitor_handles_ensure_node() {
+        let result = leak_parse(b"begin; 1; ensure; 2; end");
+        assert!(count_all_nodes(&result.node()) > 2);
+    }
+
+    #[test]
+    fn visitor_handles_block_argument_node() {
+        let result = leak_parse(b"arr.map(&method(:puts))");
+        assert!(count_all_nodes(&result.node()) > 2);
+    }
+
+    #[test]
+    fn visitor_handles_begin_with_rescue_else_ensure() {
+        let result = leak_parse(
+            b"begin; 1; rescue StandardError => e; 2; else; 3; ensure; 4; end",
+        );
+        assert!(count_all_nodes(&result.node()) > 6);
+    }
+
+    #[test]
+    fn visitor_handles_chained_rescue() {
+        let result = leak_parse(
+            b"begin; rescue TypeError; 1; rescue StandardError; 2; end",
+        );
+        assert!(count_all_nodes(&result.node()) > 4);
+    }
+
+    #[test]
+    fn visitor_handles_class_with_superclass() {
+        let result = leak_parse(b"class Foo < Bar; def x; end; end");
+        assert!(count_all_nodes(&result.node()) > 3);
+    }
+
+    #[test]
+    fn visitor_handles_module_with_body() {
+        let result = leak_parse(b"module Foo; module Bar; end; end");
+        assert!(count_all_nodes(&result.node()) > 2);
+    }
+
+    #[test]
+    fn visitor_handles_singleton_class() {
+        let result = leak_parse(b"class << self; def foo; end; end");
+        assert!(count_all_nodes(&result.node()) > 2);
+    }
+
+    #[test]
+    fn visitor_handles_range_no_left() {
+        let result = leak_parse(b"..10");
+        assert!(count_all_nodes(&result.node()) > 1);
+    }
+
+    #[test]
+    fn visitor_handles_range_no_right() {
+        let result = leak_parse(b"1..");
+        assert!(count_all_nodes(&result.node()) > 1);
+    }
+
+    #[test]
+    fn visitor_handles_yield_with_args() {
+        let result = leak_parse(b"def foo; yield 1, 2; end");
+        assert!(count_all_nodes(&result.node()) > 3);
+    }
+
+    #[test]
+    fn visitor_handles_return_with_value() {
+        let result = leak_parse(b"def foo; return 42; end");
+        assert!(count_all_nodes(&result.node()) > 2);
+    }
+
+    #[test]
+    fn visitor_handles_for_with_statements() {
+        let result = leak_parse(b"for x in [1, 2]; puts x; end");
+        assert!(count_all_nodes(&result.node()) > 4);
+    }
+
+    #[test]
+    fn visitor_handles_case_with_else() {
+        let result = leak_parse(b"case x; when 1; 'a'; else; 'default'; end");
+        assert!(count_all_nodes(&result.node()) > 4);
+    }
+
+    #[test]
+    fn visitor_handles_case_no_predicate() {
+        let result = leak_parse(b"case; when true; 1; end");
+        assert!(count_all_nodes(&result.node()) > 2);
+    }
+
+    #[test]
+    fn visitor_handles_lambda_with_params() {
+        let result = leak_parse(b"->(x, y) { x + y }");
+        assert!(count_all_nodes(&result.node()) > 3);
+    }
+
+    #[test]
+    fn visitor_handles_block_with_params_and_body() {
+        let result = leak_parse(b"[1].each { |x| puts x }");
+        assert!(count_all_nodes(&result.node()) > 4);
+    }
+
+    #[test]
+    fn visitor_handles_def_with_params() {
+        let result = leak_parse(b"def foo(a, b); a + b; end");
+        assert!(count_all_nodes(&result.node()) > 4);
+    }
+
+    #[test]
+    fn visitor_handles_if_with_subsequent() {
+        let result = leak_parse(b"if a; 1; elsif b; 2; else; 3; end");
+        assert!(count_all_nodes(&result.node()) > 5);
+    }
+
+    #[test]
+    fn visitor_handles_while_with_statements() {
+        let result = leak_parse(b"while x; puts x; x -= 1; end");
+        assert!(count_all_nodes(&result.node()) > 3);
+    }
+
+    #[test]
+    fn visitor_handles_assoc_node() {
+        let result = leak_parse(b"{a: 1, b: 2, c: 3}");
+        assert!(count_all_nodes(&result.node()) > 6);
+    }
+
+    #[test]
+    fn visitor_handles_in_node_with_statements() {
+        let result = leak_parse(b"case x; in [1, 2]; puts 'matched'; end");
+        assert!(count_all_nodes(&result.node()) > 4);
+    }
+
+    /// Helper to count direct children of a parsed node using for_each_direct_child.
+    fn count_direct_children(node: &Node<'_>) -> usize {
+        let mut count = 0;
+        for_each_direct_child(node, &mut |_| count += 1);
+        count
+    }
+
+    /// Helper to get the first statement from a program.
+    fn first_stmt<'a>(result: &'a ruby_prism::ParseResult<'a>) -> Node<'a> {
+        let prog = result.node().as_program_node().unwrap();
+        prog.statements().body().iter().next().unwrap()
+    }
+
+    #[test]
+    fn direct_children_program_node() {
+        let result = leak_parse(b"1; 2; 3");
+        assert_eq!(count_direct_children(&result.node()), 3);
+    }
+
+    #[test]
+    fn direct_children_call_node() {
+        let result = leak_parse(b"foo(1, 2)");
+        let node = first_stmt(result);
+        assert!(count_direct_children(&node) >= 2);
+    }
+
+    #[test]
+    fn direct_children_call_with_receiver_and_block() {
+        let result = leak_parse(b"arr.map { |x| x }");
+        let node = first_stmt(result);
+        assert!(count_direct_children(&node) >= 2);
+    }
+
+    #[test]
+    fn direct_children_block_node() {
+        let result = leak_parse(b"arr.map { |x| x }");
+        let call = first_stmt(result).as_call_node().unwrap();
+        let block = call.block().unwrap();
+        assert!(count_direct_children(&block) >= 1);
+    }
+
+    #[test]
+    fn direct_children_block_argument_node() {
+        let result = leak_parse(b"arr.map(&:to_s)");
+        let call = first_stmt(result).as_call_node().unwrap();
+        let block_arg = call.block().unwrap();
+        assert!(count_direct_children(&block_arg) >= 1);
+    }
+
+    #[test]
+    fn direct_children_def_node() {
+        let result = leak_parse(b"def foo(a); a + 1; end");
+        let node = first_stmt(result);
+        assert!(count_direct_children(&node) >= 2);
+    }
+
+    #[test]
+    fn direct_children_for_node() {
+        let result = leak_parse(b"for x in [1]; puts x; end");
+        let node = first_stmt(result);
+        assert!(count_direct_children(&node) >= 3);
+    }
+
+    #[test]
+    fn direct_children_begin_node() {
+        let result = leak_parse(b"begin; 1; rescue => e; 2; else; 3; ensure; 4; end");
+        let node = first_stmt(result);
+        assert!(count_direct_children(&node) >= 3);
+    }
+
+    #[test]
+    fn direct_children_ensure_node() {
+        let result = leak_parse(b"begin; ensure; 1; 2; end");
+        let begin = first_stmt(result).as_begin_node().unwrap();
+        let ensure = begin.ensure_clause().unwrap();
+        // Test that ensure's statements are visited
+        assert!(ensure.statements().is_some());
+    }
+
+    #[test]
+    fn direct_children_else_node() {
+        let result = leak_parse(b"if true; 1; else; 2; end");
+        let node = first_stmt(result);
+        assert!(count_direct_children(&node) >= 3);
+    }
+
+    #[test]
+    fn direct_children_if_node() {
+        let result = leak_parse(b"if a; 1; elsif b; 2; else; 3; end");
+        let node = first_stmt(result);
+        assert!(count_direct_children(&node) >= 3);
+    }
+
+    #[test]
+    fn direct_children_unless_node() {
+        let result = leak_parse(b"unless x; 1; else; 2; end");
+        let node = first_stmt(result);
+        assert!(count_direct_children(&node) >= 3);
+    }
+
+    #[test]
+    fn direct_children_while_node() {
+        let result = leak_parse(b"while true; 1; end");
+        let node = first_stmt(result);
+        assert!(count_direct_children(&node) >= 2);
+    }
+
+    #[test]
+    fn direct_children_until_node() {
+        let result = leak_parse(b"until false; 1; end");
+        let node = first_stmt(result);
+        assert!(count_direct_children(&node) >= 2);
+    }
+
+    #[test]
+    fn direct_children_case_node() {
+        let result = leak_parse(b"case x; when 1; 'a'; else; 'b'; end");
+        let node = first_stmt(result);
+        assert!(count_direct_children(&node) >= 3);
+    }
+
+    #[test]
+    fn direct_children_when_node() {
+        let result = leak_parse(b"case x; when 1, 2; 'a'; end");
+        let case = first_stmt(result).as_case_node().unwrap();
+        let when = case.conditions().iter().next().unwrap();
+        assert!(count_direct_children(&when) >= 2);
+    }
+
+    #[test]
+    fn direct_children_class_node() {
+        let result = leak_parse(b"class Foo < Bar; def x; end; end");
+        let node = first_stmt(result);
+        assert!(count_direct_children(&node) >= 2);
+    }
+
+    #[test]
+    fn direct_children_module_node() {
+        let result = leak_parse(b"module Foo; def x; end; end");
+        let node = first_stmt(result);
+        assert!(count_direct_children(&node) >= 2);
+    }
+
+    #[test]
+    fn direct_children_singleton_class_node() {
+        let result = leak_parse(b"class << self; def x; end; end");
+        let node = first_stmt(result);
+        assert!(count_direct_children(&node) >= 2);
+    }
+
+    #[test]
+    fn direct_children_array_node() {
+        let result = leak_parse(b"[1, 2, 3]");
+        let node = first_stmt(result);
+        assert_eq!(count_direct_children(&node), 3);
+    }
+
+    #[test]
+    fn direct_children_hash_node() {
+        let result = leak_parse(b"{a: 1, b: 2}");
+        let node = first_stmt(result);
+        assert_eq!(count_direct_children(&node), 2);
+    }
+
+    #[test]
+    fn direct_children_keyword_hash_node() {
+        let result = leak_parse(b"foo(a: 1, b: 2)");
+        let call = first_stmt(result).as_call_node().unwrap();
+        let args = call.arguments().unwrap();
+        let kw_hash = args.arguments().iter().next().unwrap();
+        assert_eq!(count_direct_children(&kw_hash), 2);
+    }
+
+    #[test]
+    fn direct_children_assoc_splat_node() {
+        let result = leak_parse(b"{**opts}");
+        let hash = first_stmt(result).as_hash_node().unwrap();
+        let splat = hash.elements().iter().next().unwrap();
+        assert_eq!(count_direct_children(&splat), 1);
+    }
+
+    #[test]
+    fn direct_children_range_node() {
+        let result = leak_parse(b"1..10");
+        let node = first_stmt(result);
+        assert_eq!(count_direct_children(&node), 2);
+    }
+
+    #[test]
+    fn direct_children_parentheses_node() {
+        let result = leak_parse(b"(1 + 2)");
+        let node = first_stmt(result);
+        assert_eq!(count_direct_children(&node), 1);
+    }
+
+    #[test]
+    fn direct_children_interpolated_string() {
+        let result = leak_parse(b"\"hello #{x} world\"");
+        let node = first_stmt(result);
+        assert!(count_direct_children(&node) >= 2);
+    }
+
+    #[test]
+    fn direct_children_interpolated_symbol() {
+        let result = leak_parse(b":\"hello#{x}\"");
+        let node = first_stmt(result);
+        assert!(count_direct_children(&node) >= 1);
+    }
+
+    #[test]
+    fn direct_children_embedded_statements() {
+        let result = leak_parse(b"\"#{1 + 2}\"");
+        let interp = first_stmt(result).as_interpolated_string_node().unwrap();
+        let embedded = interp.parts().iter().next().unwrap();
+        assert!(count_direct_children(&embedded) >= 1);
+    }
+
+    #[test]
+    fn direct_children_constant_path_node() {
+        let result = leak_parse(b"Foo::Bar");
+        let node = first_stmt(result);
+        assert!(count_direct_children(&node) >= 1);
+    }
+
+    #[test]
+    fn direct_children_multi_write_node() {
+        let result = leak_parse(b"a, *b, c = 1, 2, 3");
+        let node = first_stmt(result);
+        assert!(count_direct_children(&node) >= 3);
+    }
+
+    #[test]
+    fn direct_children_splat_node() {
+        let result = leak_parse(b"a, *b = [1, 2]");
+        let mw = first_stmt(result).as_multi_write_node().unwrap();
+        let rest = mw.rest().unwrap();
+        assert!(count_direct_children(&rest) >= 1);
+    }
+
+    #[test]
+    fn direct_children_return_node() {
+        let result = leak_parse(b"def foo; return 1, 2; end");
+        let def = first_stmt(result).as_def_node().unwrap();
+        let body_stmts = def.body().unwrap().as_statements_node().unwrap();
+        let ret = body_stmts.body().iter().next().unwrap();
+        assert!(count_direct_children(&ret) >= 2);
+    }
+
+    #[test]
+    fn direct_children_yield_node() {
+        let result = leak_parse(b"def foo; yield 1, 2; end");
+        let def = first_stmt(result).as_def_node().unwrap();
+        let body_stmts = def.body().unwrap().as_statements_node().unwrap();
+        let yld = body_stmts.body().iter().next().unwrap();
+        assert!(count_direct_children(&yld) >= 2);
+    }
+
+    #[test]
+    fn direct_children_super_node() {
+        let result = leak_parse(b"def foo; super(1) { 2 }; end");
+        let def = first_stmt(result).as_def_node().unwrap();
+        let body_stmts = def.body().unwrap().as_statements_node().unwrap();
+        let sup = body_stmts.body().iter().next().unwrap();
+        assert!(count_direct_children(&sup) >= 2);
+    }
+
+    #[test]
+    fn direct_children_lambda_node() {
+        let result = leak_parse(b"->(x) { x + 1 }");
+        let node = first_stmt(result);
+        assert!(count_direct_children(&node) >= 2);
+    }
+
+    #[test]
+    fn direct_children_interpolated_regex() {
+        let result = leak_parse(b"/foo#{bar}/");
+        let node = first_stmt(result);
+        assert!(count_direct_children(&node) >= 1);
+    }
+
+    #[test]
+    fn direct_children_case_match_node() {
+        let result = leak_parse(b"case x; in Integer; 1; else; 2; end");
+        let node = first_stmt(result);
+        assert!(count_direct_children(&node) >= 2);
+    }
+
+    #[test]
+    fn direct_children_in_node() {
+        let result = leak_parse(b"case x; in Integer; 1; end");
+        let cm = first_stmt(result).as_case_match_node().unwrap();
+        let in_node = cm.conditions().iter().next().unwrap();
+        assert!(count_direct_children(&in_node) >= 2);
+    }
+
+    #[test]
+    fn direct_children_break_node() {
+        let result = leak_parse(b"loop { break 42 }");
+        let call = first_stmt(result).as_call_node().unwrap();
+        let block = call.block().unwrap().as_block_node().unwrap();
+        let body_stmts = block.body().unwrap().as_statements_node().unwrap();
+        let brk = body_stmts.body().iter().next().unwrap();
+        assert_eq!(count_direct_children(&brk), 1);
+    }
+
+    #[test]
+    fn direct_children_next_node() {
+        let result = leak_parse(b"loop { next 42 }");
+        let call = first_stmt(result).as_call_node().unwrap();
+        let block = call.block().unwrap().as_block_node().unwrap();
+        let body_stmts = block.body().unwrap().as_statements_node().unwrap();
+        let nxt = body_stmts.body().iter().next().unwrap();
+        assert_eq!(count_direct_children(&nxt), 1);
+    }
+
+    #[test]
+    fn direct_children_undef_node() {
+        let result = leak_parse(b"undef :foo, :bar");
+        let node = first_stmt(result);
+        assert_eq!(count_direct_children(&node), 2);
+    }
+
+    #[test]
+    fn direct_children_index_operator_write() {
+        let result = leak_parse(b"a[0] += 1");
+        let node = first_stmt(result);
+        assert!(count_direct_children(&node) >= 2);
+    }
+
+    #[test]
+    fn direct_children_index_and_write() {
+        let result = leak_parse(b"a[0] &&= 1");
+        let node = first_stmt(result);
+        assert!(count_direct_children(&node) >= 2);
+    }
+
+    #[test]
+    fn direct_children_index_or_write() {
+        let result = leak_parse(b"a[0] ||= 1");
+        let node = first_stmt(result);
+        assert!(count_direct_children(&node) >= 2);
+    }
+
+    #[test]
     fn leaf_nodes_have_no_extra_children() {
         let leaf_sources: &[&[u8]] = &[b"42", b"3.14", b"'s'", b":sym", b"true", b"false", b"nil"];
 

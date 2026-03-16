@@ -3,17 +3,12 @@ use crate::offense::{Offense, OffenseKind};
 
 /// Any `for` loop emits an offense — prefer `.each`.
 pub fn scan(node: &ruby_prism::ForNode<'_>, source: &[u8]) -> Vec<Offense> {
-    match build_fix(node, source) {
-        Some(fix) => vec![Offense::with_fix(
-            OffenseKind::ForLoopVsEach,
-            node.for_keyword_loc().start_offset(),
-            fix,
-        )],
-        None => vec![Offense::new(
-            OffenseKind::ForLoopVsEach,
-            node.for_keyword_loc().start_offset(),
-        )],
-    }
+    let fix = build_fix(node, source);
+    vec![Offense::with_optional_fix(
+        OffenseKind::ForLoopVsEach,
+        node.for_keyword_loc().start_offset(),
+        fix,
+    )]
 }
 
 /// Build a fix that transforms `for x in arr` → `arr.each do |x|`.

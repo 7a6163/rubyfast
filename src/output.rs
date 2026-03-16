@@ -480,6 +480,63 @@ mod tests {
     }
 
     #[test]
+    fn print_statistics_with_fixable_offenses() {
+        let offenses = vec![
+            Offense::with_fix(OffenseKind::ForLoopVsEach, 1, Fix::single(0, 3, "x")),
+            Offense::with_fix(OffenseKind::GsubVsTr, 2, Fix::single(0, 3, "y")),
+        ];
+        let result = make_result(offenses);
+        print_statistics(&result);
+    }
+
+    #[test]
+    fn print_results_with_parse_errors() {
+        let result = TraversalResult {
+            results: vec![AnalysisResult {
+                path: "ok.rb".to_string(),
+                offenses: vec![Offense::new(OffenseKind::GsubVsTr, 1)],
+            }],
+            parse_errors: vec![ParseError {
+                path: "bad.rb".to_string(),
+                message: "syntax error".to_string(),
+            }],
+            files_inspected: 2,
+        };
+        print_results(&result, &OutputFormat::File);
+    }
+
+    #[test]
+    fn print_fix_results_with_parse_errors() {
+        let result = TraversalResult {
+            results: vec![AnalysisResult {
+                path: "ok.rb".to_string(),
+                offenses: vec![Offense::with_fix(
+                    OffenseKind::ForLoopVsEach,
+                    1,
+                    Fix::single(0, 3, "x"),
+                )],
+            }],
+            parse_errors: vec![ParseError {
+                path: "bad.rb".to_string(),
+                message: "syntax error".to_string(),
+            }],
+            files_inspected: 2,
+        };
+        print_fix_results(&result, 1, 0, &OutputFormat::File);
+    }
+
+    #[test]
+    fn print_results_by_file_with_fixable_offense() {
+        let offenses = vec![Offense::with_fix(
+            OffenseKind::ForLoopVsEach,
+            1,
+            Fix::single(0, 3, "x"),
+        )];
+        let result = make_result(offenses);
+        print_results_by_file(&result);
+    }
+
+    #[test]
     fn print_fix_results_unfixable_remaining() {
         let offenses = vec![
             Offense::new(OffenseKind::GsubVsTr, 1),
