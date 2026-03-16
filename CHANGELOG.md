@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.3.1] - 2026-03-16
+
+### Fixed
+
+- Add `clang` dependency to Dockerfile for `ruby-prism` bindgen compilation
+
 ## [1.3.0] - 2026-03-16
 
 ### Changed
