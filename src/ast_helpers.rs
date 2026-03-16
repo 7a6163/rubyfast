@@ -1,7 +1,7 @@
 use lib_ruby_parser::Node;
+use lib_ruby_parser::ParserOptions;
 use lib_ruby_parser::nodes::{Block, Def, Send};
 use lib_ruby_parser::source::{Decoder, DecoderResult};
-use lib_ruby_parser::ParserOptions;
 
 /// Convert a byte offset to a 1-based line number using pre-computed newline positions.
 pub fn byte_offset_to_line(newline_positions: &[usize], byte_offset: usize) -> usize {
@@ -186,13 +186,14 @@ pub fn body_expressions(body: &Option<Box<Node>>) -> Vec<&Node> {
 /// The lib_ruby_parser only supports UTF-8 and ASCII-8BIT out of the box.
 /// Since ASCII is a subset of UTF-8, we pass the bytes through unchanged.
 pub fn parser_options() -> ParserOptions {
-    let decoder = Decoder::new(Box::new(|encoding: String, input: Vec<u8>| {
-        match encoding.to_uppercase().as_str() {
-            "ASCII" | "US-ASCII" => DecoderResult::Ok(input),
-            _ => DecoderResult::Err(
-                lib_ruby_parser::source::InputError::UnsupportedEncoding(encoding),
-            ),
-        }
+    let decoder = Decoder::new(Box::new(|encoding: String, input: Vec<u8>| match encoding
+        .to_uppercase()
+        .as_str()
+    {
+        "ASCII" | "US-ASCII" => DecoderResult::Ok(input),
+        _ => DecoderResult::Err(lib_ruby_parser::source::InputError::UnsupportedEncoding(
+            encoding,
+        )),
     }));
     ParserOptions {
         decoder: Some(decoder),
