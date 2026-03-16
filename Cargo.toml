@@ -21,3 +21,4 @@ anyhow = "1"
 
 [dev-dependencies]
 tempfile = "3"
+ruby-prism = "1.9"
