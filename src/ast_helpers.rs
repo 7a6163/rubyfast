@@ -48,12 +48,22 @@ pub fn arg_count(call: &ruby_prism::CallNode<'_>) -> usize {
     }
 }
 
-/// Get arguments as a collected Vec from a CallNode.
-pub fn call_args<'pr>(call: &ruby_prism::CallNode<'pr>) -> Vec<Node<'pr>> {
-    match call.arguments() {
-        Some(args) => args.arguments().iter().collect(),
-        None => vec![],
+/// Get the first argument from a CallNode (without allocating a Vec).
+pub fn first_call_arg<'pr>(call: &ruby_prism::CallNode<'pr>) -> Option<Node<'pr>> {
+    call.arguments()
+        .and_then(|args| args.arguments().iter().next())
+}
+
+/// Get the first two arguments from a CallNode as a tuple (without collecting all).
+pub fn call_args_pair<'pr>(call: &ruby_prism::CallNode<'pr>) -> Option<(Node<'pr>, Node<'pr>)> {
+    let args = call.arguments()?;
+    let mut iter = args.arguments().iter();
+    let first = iter.next()?;
+    let second = iter.next()?;
+    if iter.next().is_some() {
+        return None; // more than 2 args
     }
+    Some((first, second))
 }
 
 /// Check if a node is a single-character string literal.
@@ -108,8 +118,9 @@ pub fn is_primitive(node: &Node<'_>) -> bool {
 
 /// Check if the first argument is a Hash/KeywordHash node with exactly one key-value pair.
 /// `h.merge!(item: 1)` parses as KeywordHashNode, `h.merge!({item: 1})` parses as HashNode.
-pub fn first_arg_is_single_pair_hash(args: &[Node<'_>]) -> bool {
-    match args.first() {
+/// Check if the first argument of a CallNode is a Hash/KeywordHash with exactly one pair.
+pub fn first_arg_is_single_pair_hash(call: &ruby_prism::CallNode<'_>) -> bool {
+    match first_call_arg(call) {
         Some(node) => {
             if let Some(h) = node.as_hash_node() {
                 return h.elements().iter().count() == 1;
@@ -216,20 +227,22 @@ pub fn body_expression_count(body: &Option<Node<'_>>) -> usize {
     }
 }
 
-/// Get the first expression from a body node (if any).
-/// The body must be re-obtained from the parent to produce an owned Node.
-pub fn body_first_expression<'pr>(body: &Option<Node<'pr>>) -> Option<Node<'pr>> {
-    match body {
-        None => None,
-        Some(node) => {
-            if let Some(stmts) = node.as_statements_node() {
-                stmts.body().iter().next()
-            } else {
-                // Single expression body — caller should re-call parent.body()
-                // to get an owned Node. We can't clone the reference.
-                None
-            }
+/// Get the single expression from a body node, if the body has exactly one expression.
+/// For StatementsNode bodies, returns the first (and only) statement.
+/// For single-expression bodies (non-StatementsNode), returns the body node itself.
+/// Returns None if body is empty or has multiple expressions.
+pub fn body_single_expression(body: Option<Node<'_>>) -> Option<Node<'_>> {
+    let node = body?;
+    if let Some(stmts) = node.as_statements_node() {
+        let mut iter = stmts.body().iter();
+        let first = iter.next()?;
+        if iter.next().is_some() {
+            return None; // multiple expressions
         }
+        Some(first)
+    } else {
+        // Single expression body — the node itself is the expression
+        Some(node)
     }
 }
 
@@ -389,32 +402,28 @@ mod tests {
     fn first_arg_is_single_pair_hash_kwargs() {
         let node = parse_first_stmt(b"h.merge!(a: 1)");
         let call = node.as_call_node().unwrap();
-        let args = call_args(&call);
-        assert!(first_arg_is_single_pair_hash(&args));
+        assert!(first_arg_is_single_pair_hash(&call));
     }
 
     #[test]
     fn first_arg_is_single_pair_hash_explicit() {
         let node = parse_first_stmt(b"h.merge!({a: 1})");
         let call = node.as_call_node().unwrap();
-        let args = call_args(&call);
-        assert!(first_arg_is_single_pair_hash(&args));
+        assert!(first_arg_is_single_pair_hash(&call));
     }
 
     #[test]
     fn first_arg_is_single_pair_hash_multi() {
         let node = parse_first_stmt(b"h.merge!(a: 1, b: 2)");
         let call = node.as_call_node().unwrap();
-        let args = call_args(&call);
-        assert!(!first_arg_is_single_pair_hash(&args));
+        assert!(!first_arg_is_single_pair_hash(&call));
     }
 
     #[test]
     fn first_arg_is_single_pair_hash_not_hash() {
         let node = parse_first_stmt(b"h.merge!(x)");
         let call = node.as_call_node().unwrap();
-        let args = call_args(&call);
-        assert!(!first_arg_is_single_pair_hash(&args));
+        assert!(!first_arg_is_single_pair_hash(&call));
     }
 
     #[test]
@@ -529,12 +538,24 @@ mod tests {
     }
 
     #[test]
-    fn body_first_expression_works() {
+    fn body_single_expression_works() {
         let node = parse_first_stmt(b"def foo; 42; end");
         let def = node.as_def_node().unwrap();
-        let first = body_first_expression(&def.body());
-        assert!(first.is_some());
-        assert!(first.unwrap().as_integer_node().is_some());
+        let single = body_single_expression(def.body());
+        assert!(single.is_some());
+        assert!(single.unwrap().as_integer_node().is_some());
+    }
+
+    #[test]
+    fn body_single_expression_none_for_multiple() {
+        let node = parse_first_stmt(b"def foo; 1; 2; end");
+        let def = node.as_def_node().unwrap();
+        assert!(body_single_expression(def.body()).is_none());
+    }
+
+    #[test]
+    fn body_single_expression_none_for_empty() {
+        assert!(body_single_expression(None).is_none());
     }
 
     #[test]

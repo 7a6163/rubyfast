@@ -93,32 +93,34 @@ pub fn scan_call_on_block_call(
     }
 
     // .map{}.flatten(1) → .flat_map{}
-    if outer_name == b"flatten" && recv_name == b"map" {
-        let args = call_args(outer);
-        if args.len() == 1 && is_int_one(&args[0]) {
-            let offense = match (recv_call.message_loc(), outer.call_operator_loc()) {
-                (Some(sel_l), Some(dot_l)) => {
-                    let fix = Fix::two(
-                        sel_l.start_offset(),
-                        sel_l.end_offset(),
-                        "flat_map",
-                        dot_l.start_offset(),
-                        outer.location().end_offset(),
-                        "",
-                    );
-                    Offense::with_fix(
-                        OffenseKind::MapFlattenVsFlatMap,
-                        outer.location().start_offset(),
-                        fix,
-                    )
-                }
-                _ => Offense::new(
+    if outer_name == b"flatten"
+        && recv_name == b"map"
+        && let Some(arg) = first_call_arg(outer)
+        && arg_count(outer) == 1
+        && is_int_one(&arg)
+    {
+        let offense = match (recv_call.message_loc(), outer.call_operator_loc()) {
+            (Some(sel_l), Some(dot_l)) => {
+                let fix = Fix::two(
+                    sel_l.start_offset(),
+                    sel_l.end_offset(),
+                    "flat_map",
+                    dot_l.start_offset(),
+                    outer.location().end_offset(),
+                    "",
+                );
+                Offense::with_fix(
                     OffenseKind::MapFlattenVsFlatMap,
                     outer.location().start_offset(),
-                ),
-            };
-            offenses.push(offense);
-        }
+                    fix,
+                )
+            }
+            _ => Offense::new(
+                OffenseKind::MapFlattenVsFlatMap,
+                outer.location().start_offset(),
+            ),
+        };
+        offenses.push(offense);
     }
 
     offenses
@@ -263,8 +265,10 @@ fn check_map_flatten(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offense
     if call.name().as_slice() != b"flatten" {
         return;
     }
-    let args = call_args(call);
-    if args.len() != 1 || !is_int_one(&args[0]) {
+    if arg_count(call) != 1 {
+        return;
+    }
+    if !first_call_arg(call).is_some_and(|a| is_int_one(&a)) {
         return;
     }
     // Only match when receiver is map WITHOUT a full block (block_pass is ok).
@@ -317,11 +321,10 @@ fn check_gsub_vs_tr(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offense>
     if call.name().as_slice() != b"gsub" {
         return;
     }
-    let args = call_args(call);
-    if args.len() != 2 {
+    let Some((first, second)) = call_args_pair(call) else {
         return;
-    }
-    if is_single_char_string(&args[0]) && is_single_char_string(&args[1]) {
+    };
+    if is_single_char_string(&first) && is_single_char_string(&second) {
         let offense = match call.message_loc() {
             Some(sel_l) => {
                 let fix = Fix::single(sel_l.start_offset(), sel_l.end_offset(), "tr");
@@ -358,11 +361,10 @@ fn check_hash_merge_bang(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Off
     if call.name().as_slice() != b"merge!" {
         return;
     }
-    let args = call_args(call);
-    if args.len() != 1 {
+    if arg_count(call) != 1 {
         return;
     }
-    if first_arg_is_single_pair_hash(&args) {
+    if first_arg_is_single_pair_hash(call) {
         offenses.push(Offense::new(
             OffenseKind::HashMergeBangVsHashBrackets,
             call.location().start_offset(),
@@ -375,9 +377,8 @@ fn check_module_eval_call(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Of
     if call.name().as_slice() != b"module_eval" {
         return;
     }
-    let args = call_args(call);
-    if let Some(first_arg) = args.first()
-        && str_contains_def(first_arg)
+    if let Some(first_arg) = first_call_arg(call)
+        && str_contains_def(&first_arg)
     {
         offenses.push(Offense::new(
             OffenseKind::ModuleEval,

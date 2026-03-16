@@ -47,11 +47,15 @@ pub fn build_disabled_set(
         let end = loc.end_offset();
         let comment_line = byte_offset_to_line(newline_positions, begin);
         let comment_text = &source[begin..end.min(source.len())];
-        let comment_str = String::from_utf8_lossy(comment_text);
-
         let is_trailing = is_trailing_comment(source, begin);
 
-        if let Some(directive) = parse_directive(&comment_str) {
+        // Use from_utf8 to avoid allocation for valid UTF-8 (the common case)
+        let comment_str = match std::str::from_utf8(comment_text) {
+            Ok(s) => s,
+            Err(_) => continue, // skip non-UTF-8 comments
+        };
+
+        if let Some(directive) = parse_directive(comment_str) {
             match directive {
                 Directive::Disable(targets) if is_trailing => {
                     // Same-line disable

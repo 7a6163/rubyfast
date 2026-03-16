@@ -150,33 +150,14 @@ fn walk_node(node: &Node<'_>, offenses: &mut Vec<Offense>, source: &[u8]) {
                 Some(Node::BlockNode { .. }) => {
                     let block = call.block().unwrap().as_block_node().unwrap();
                     offenses.extend(method_call_scanner::scan_call_with_block(&call, &block));
-
-                    // Walk receiver and arguments (skip the block's call — we already scanned it)
-                    if let Some(recv) = call.receiver() {
-                        walk_node(&recv, offenses, source);
-                    }
-                    if let Some(args) = call.arguments() {
-                        for arg in args.arguments().iter() {
-                            walk_node(&arg, offenses, source);
-                        }
-                    }
-                    // Walk block body
+                    walk_call_children(&call, offenses, source);
                     if let Some(body) = block.body() {
                         walk_node(&body, offenses, source);
                     }
                 }
                 _ => {
-                    // No block or block argument — scan as plain send
                     offenses.extend(method_call_scanner::scan_call(&call));
-                    // Walk all children
-                    if let Some(recv) = call.receiver() {
-                        walk_node(&recv, offenses, source);
-                    }
-                    if let Some(args) = call.arguments() {
-                        for arg in args.arguments().iter() {
-                            walk_node(&arg, offenses, source);
-                        }
-                    }
+                    walk_call_children(&call, offenses, source);
                     if let Some(block) = call.block() {
                         walk_node(&block, offenses, source);
                     }
@@ -214,6 +195,18 @@ fn walk_rescue_node(
     // Walk subsequent rescue clauses
     if let Some(subsequent) = rescue.subsequent() {
         walk_rescue_node(&subsequent, offenses, source);
+    }
+}
+
+/// Walk a CallNode's receiver and arguments (shared by block and non-block paths).
+fn walk_call_children(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offense>, source: &[u8]) {
+    if let Some(recv) = call.receiver() {
+        walk_node(&recv, offenses, source);
+    }
+    if let Some(args) = call.arguments() {
+        for arg in args.arguments().iter() {
+            walk_node(&arg, offenses, source);
+        }
     }
 }
 
