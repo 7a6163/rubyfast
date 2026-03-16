@@ -10,7 +10,7 @@ keywords = ["ruby", "linter", "performance", "static-analysis"]
 categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
-lib-ruby-parser = "4.0"
+ruby-prism = "1.9"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
@@ -21,4 +21,3 @@ anyhow = "1"
 
 [dev-dependencies]
 tempfile = "3"
-ruby-prism = "1.9"

@@ -1,9 +1,9 @@
 use std::path::Path;
 
-use lib_ruby_parser::{ErrorLevel, Node, Parser};
+use ruby_prism::Node;
 
-use crate::ast_helpers::{byte_offset_to_line, compute_newline_positions, parser_options};
-use crate::ast_visitor::for_each_child;
+use crate::ast_helpers::{byte_offset_to_line, compute_newline_positions};
+use crate::ast_visitor::for_each_direct_child;
 use crate::comment_directives::build_disabled_set;
 use crate::config::Config;
 use crate::offense::Offense;
@@ -35,49 +35,26 @@ pub fn analyze_file(path: &Path, config: &Config) -> Result<AnalysisResult, Pars
     // Pre-compute newline positions before handing source to the parser
     let newline_positions = compute_newline_positions(&source);
 
-    let source_clone = source.clone();
-    let result = Parser::new(source, parser_options()).do_parse();
+    let result = ruby_prism::parse(&source);
 
-    // Check for fatal parse errors
-    let has_errors = result
-        .diagnostics
-        .iter()
-        .any(|d| d.level == ErrorLevel::Error);
+    // Check for parse errors
+    let has_errors = result.errors().next().is_some();
 
     if has_errors {
-        if result.ast.is_none() {
-            return Err(ParseError {
-                path: path.display().to_string(),
-                message: result
-                    .diagnostics
-                    .iter()
-                    .filter(|d| d.level == ErrorLevel::Error)
-                    .map(|d| format!("{:?}", d.message))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            });
-        }
-        // Recovered AST with errors — skip analysis to avoid false positives
+        // Prism always produces an AST, but if there are errors, skip analysis
+        // to avoid false positives (matching lib-ruby-parser behavior).
         return Ok(AnalysisResult {
             path: path.display().to_string(),
             offenses: vec![],
         });
     }
 
-    let ast = match result.ast {
-        Some(ast) => ast,
-        None => {
-            return Ok(AnalysisResult {
-                path: path.display().to_string(),
-                offenses: vec![],
-            });
-        }
-    };
+    let root = result.node();
 
-    let disabled_set = build_disabled_set(&result.comments, &source_clone, &newline_positions);
+    let disabled_set = build_disabled_set(&result, &source, &newline_positions);
 
     let mut offenses = Vec::new();
-    walk_node(&ast, &mut offenses, &source_clone);
+    walk_node(&root, &mut offenses, &source);
 
     // Resolve byte offsets to line numbers, then filter by config and inline directives
     let offenses = offenses
@@ -101,48 +78,142 @@ pub fn analyze_file(path: &Path, config: &Config) -> Result<AnalysisResult, Pars
 }
 
 /// Recursively walk the AST, dispatching to scanners.
-fn walk_node(node: &Node, offenses: &mut Vec<Offense>, source: &[u8]) {
+fn walk_node(node: &Node<'_>, offenses: &mut Vec<Offense>, source: &[u8]) {
     match node {
-        Node::For(f) => {
-            offenses.extend(for_loop_scanner::scan(f, source));
-            for_each_child(node, |child| walk_node(child, offenses, source));
-        }
-        Node::RescueBody(rb) => {
-            offenses.extend(rescue_scanner::scan(rb));
-            for_each_child(node, |child| walk_node(child, offenses, source));
-        }
-        Node::Def(d) => {
-            offenses.extend(method_definition_scanner::scan(d));
-            for_each_child(node, |child| walk_node(child, offenses, source));
-        }
-        Node::Send(s) => {
-            if let Some(Node::Block(recv_block)) = s.recv.as_deref() {
-                offenses.extend(method_call_scanner::scan_send_on_block(s, recv_block));
+        Node::ProgramNode { .. } => {
+            let prog = node.as_program_node().unwrap();
+            for child in prog.statements().body().iter() {
+                walk_node(&child, offenses, source);
             }
-            offenses.extend(method_call_scanner::scan_send(s));
-            for_each_child(node, |child| walk_node(child, offenses, source));
         }
-        Node::Block(b) => {
-            offenses.extend(method_call_scanner::scan_block(b));
-            // Walk children manually to skip the inner Send (avoids double-scanning).
-            if let Node::Send(s) = b.call.as_ref() {
-                if let Some(recv) = &s.recv {
-                    walk_node(recv, offenses, source);
-                }
-                for arg in &s.args {
-                    walk_node(arg, offenses, source);
+        Node::ForNode { .. } => {
+            let f = node.as_for_node().unwrap();
+            offenses.extend(for_loop_scanner::scan(&f, source));
+            for_each_direct_child(node, &mut |child| walk_node(child, offenses, source));
+        }
+        Node::BeginNode { .. } => {
+            let begin = node.as_begin_node().unwrap();
+            // Visit statements
+            if let Some(stmts) = begin.statements() {
+                for child in stmts.body().iter() {
+                    walk_node(&child, offenses, source);
                 }
             }
-            if let Some(args) = &b.args {
-                walk_node(args, offenses, source);
+            // Visit rescue clauses
+            if let Some(rescue) = begin.rescue_clause() {
+                walk_rescue_node(&rescue, offenses, source);
             }
-            if let Some(body) = &b.body {
-                walk_node(body, offenses, source);
+            // Visit else clause
+            if let Some(else_clause) = begin.else_clause()
+                && let Some(stmts) = else_clause.statements()
+            {
+                for child in stmts.body().iter() {
+                    walk_node(&child, offenses, source);
+                }
+            }
+            // Visit ensure clause
+            if let Some(ensure) = begin.ensure_clause()
+                && let Some(stmts) = ensure.statements()
+            {
+                for child in stmts.body().iter() {
+                    walk_node(&child, offenses, source);
+                }
+            }
+        }
+        Node::RescueNode { .. } => {
+            let rn = node.as_rescue_node().unwrap();
+            walk_rescue_node(&rn, offenses, source);
+        }
+        Node::DefNode { .. } => {
+            let d = node.as_def_node().unwrap();
+            offenses.extend(method_definition_scanner::scan(&d));
+            // Walk the body
+            if let Some(body) = d.body() {
+                walk_node(&body, offenses, source);
+            }
+        }
+        Node::CallNode { .. } => {
+            let call = node.as_call_node().unwrap();
+
+            // Check if receiver is a CallNode with a BlockNode (chained: .select{}.first)
+            if let Some(recv) = call.receiver()
+                && let Some(recv_call) = recv.as_call_node()
+                && let Some(Node::BlockNode { .. }) = recv_call.block()
+            {
+                offenses.extend(method_call_scanner::scan_call_on_block_call(
+                    &call, &recv_call,
+                ));
+            }
+
+            // Check if this call has a block (CallNode owns BlockNode in prism)
+            match call.block() {
+                Some(Node::BlockNode { .. }) => {
+                    let block = call.block().unwrap().as_block_node().unwrap();
+                    offenses.extend(method_call_scanner::scan_call_with_block(&call, &block));
+
+                    // Walk receiver and arguments (skip the block's call — we already scanned it)
+                    if let Some(recv) = call.receiver() {
+                        walk_node(&recv, offenses, source);
+                    }
+                    if let Some(args) = call.arguments() {
+                        for arg in args.arguments().iter() {
+                            walk_node(&arg, offenses, source);
+                        }
+                    }
+                    // Walk block body
+                    if let Some(body) = block.body() {
+                        walk_node(&body, offenses, source);
+                    }
+                }
+                _ => {
+                    // No block or block argument — scan as plain send
+                    offenses.extend(method_call_scanner::scan_call(&call));
+                    // Walk all children
+                    if let Some(recv) = call.receiver() {
+                        walk_node(&recv, offenses, source);
+                    }
+                    if let Some(args) = call.arguments() {
+                        for arg in args.arguments().iter() {
+                            walk_node(&arg, offenses, source);
+                        }
+                    }
+                    if let Some(block) = call.block() {
+                        walk_node(&block, offenses, source);
+                    }
+                }
             }
         }
         _ => {
-            for_each_child(node, |child| walk_node(child, offenses, source));
+            for_each_direct_child(node, &mut |child| walk_node(child, offenses, source));
         }
+    }
+}
+
+/// Walk a RescueNode and its chain of subsequent rescue clauses.
+fn walk_rescue_node(
+    rescue: &ruby_prism::RescueNode<'_>,
+    offenses: &mut Vec<Offense>,
+    source: &[u8],
+) {
+    offenses.extend(rescue_scanner::scan(rescue));
+
+    // Walk exception list
+    for exc in rescue.exceptions().iter() {
+        walk_node(&exc, offenses, source);
+    }
+    // Walk reference
+    if let Some(reference) = rescue.reference() {
+        walk_node(&reference, offenses, source);
+    }
+    // Walk statements
+    if let Some(stmts) = rescue.statements() {
+        for child in stmts.body().iter() {
+            walk_node(&child, offenses, source);
+        }
+    }
+    // Walk subsequent rescue clauses
+    if let Some(subsequent) = rescue.subsequent() {
+        walk_rescue_node(&subsequent, offenses, source);
     }
 }
 
@@ -168,29 +239,13 @@ mod tests {
     }
 
     #[test]
-    fn analyze_file_with_parse_errors_no_ast_returns_error() {
+    fn analyze_file_with_parse_errors_returns_empty() {
         let dir = tempfile::TempDir::new().unwrap();
-        // This produces a fatal parse error with no recoverable AST
         let file = dir.path().join("fatal.rb");
-        std::fs::write(&file, "\x00\x01\x02").unwrap();
+        std::fs::write(&file, "def def def").unwrap();
         let config = crate::config::Config::default();
-        let result = super::analyze_file(&file, &config);
-        // May be Ok with empty offenses or Err depending on parser behavior
-        // Either way it should not panic
-        let _ = result;
-    }
-
-    #[test]
-    fn analyze_file_with_recovered_ast_returns_empty() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let file = dir.path().join("recovered.rb");
-        std::fs::write(&file, "def foo; end; def def; end").unwrap();
-        let config = crate::config::Config::default();
-        let result = super::analyze_file(&file, &config);
-        match result {
-            Ok(analysis) => assert!(analysis.offenses.is_empty()),
-            Err(_) => {} // Also acceptable — fatal parse error
-        }
+        let result = super::analyze_file(&file, &config).unwrap();
+        assert!(result.offenses.is_empty());
     }
 
     #[test]
@@ -229,8 +284,7 @@ mod tests {
     }
 
     #[test]
-    fn walk_node_block_with_non_send_call() {
-        // A numblock (numbered params) has a different call structure
+    fn walk_node_block_with_symbol_to_proc() {
         let dir = tempfile::TempDir::new().unwrap();
         let file = dir.path().join("test.rb");
         std::fs::write(&file, "arr.map { |x| x.to_s }").unwrap();

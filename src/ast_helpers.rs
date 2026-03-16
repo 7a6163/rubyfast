@@ -1,7 +1,4 @@
-use lib_ruby_parser::Node;
-use lib_ruby_parser::ParserOptions;
-use lib_ruby_parser::nodes::{Block, Def, Send};
-use lib_ruby_parser::source::{Decoder, DecoderResult};
+use ruby_prism::Node;
 
 /// Convert a byte offset to a 1-based line number using pre-computed newline positions.
 pub fn byte_offset_to_line(newline_positions: &[usize], byte_offset: usize) -> usize {
@@ -11,193 +8,252 @@ pub fn byte_offset_to_line(newline_positions: &[usize], byte_offset: usize) -> u
     }
 }
 
-/// Check if a Send node's receiver is itself a Send with a given method name.
-pub fn receiver_is_send_with_name(recv: &Option<Box<Node>>, name: &str) -> bool {
-    match recv.as_deref() {
-        Some(Node::Send(s)) => s.method_name == name,
-        _ => false,
+/// Check if a node is a CallNode with the given method name.
+pub fn receiver_is_call_with_name(recv: &Option<Node<'_>>, name: &[u8]) -> bool {
+    match recv {
+        Some(node) => {
+            if let Some(call) = node.as_call_node() {
+                call.name().as_slice() == name
+            } else {
+                false
+            }
+        }
+        None => false,
     }
 }
 
-/// Extract the inner Send from a receiver, if it is one.
-pub fn receiver_as_send(recv: &Option<Box<Node>>) -> Option<&Send> {
-    match recv.as_deref() {
-        Some(Node::Send(s)) => Some(s),
-        _ => None,
+/// Extract the inner CallNode from a receiver, if it is one.
+pub fn receiver_as_call<'pr>(recv: &'pr Option<Node<'pr>>) -> Option<ruby_prism::CallNode<'pr>> {
+    match recv {
+        Some(node) => node.as_call_node(),
+        None => None,
     }
 }
 
-/// Extract the Send from a Block's call field.
-pub fn block_call_as_send(block: &Block) -> Option<&Send> {
-    match block.call.as_ref() {
-        Node::Send(s) => Some(s),
-        _ => None,
+/// Check if a CallNode has a BlockArgumentNode in its block field.
+pub fn has_block_pass(call: &ruby_prism::CallNode<'_>) -> bool {
+    matches!(call.block(), Some(Node::BlockArgumentNode { .. }))
+}
+
+/// Check if a CallNode has a full BlockNode (not just a BlockArgumentNode).
+pub fn has_full_block(call: &ruby_prism::CallNode<'_>) -> bool {
+    matches!(call.block(), Some(Node::BlockNode { .. }))
+}
+
+/// Count arguments from a CallNode's arguments (excluding block argument which is in block field).
+pub fn arg_count(call: &ruby_prism::CallNode<'_>) -> usize {
+    match call.arguments() {
+        Some(args) => args.arguments().iter().count(),
+        None => 0,
     }
 }
 
-/// Check if an argument list contains a BlockPass (e.g., `&:foo`).
-pub fn has_block_pass(args: &[Node]) -> bool {
-    args.iter().any(|a| matches!(a, Node::BlockPass(_)))
-}
-
-/// Count non-BlockPass arguments.
-pub fn arg_count_without_block_pass(args: &[Node]) -> usize {
-    args.iter()
-        .filter(|a| !matches!(a, Node::BlockPass(_)))
-        .count()
+/// Get arguments as a collected Vec from a CallNode.
+pub fn call_args<'pr>(call: &ruby_prism::CallNode<'pr>) -> Vec<Node<'pr>> {
+    match call.arguments() {
+        Some(args) => args.arguments().iter().collect(),
+        None => vec![],
+    }
 }
 
 /// Check if a node is a single-character string literal.
-pub fn is_single_char_string(node: &Node) -> bool {
-    match node {
-        Node::Str(s) => s.value.to_string_lossy().chars().count() == 1,
-        _ => false,
+pub fn is_single_char_string(node: &Node<'_>) -> bool {
+    match node.as_string_node() {
+        Some(s) => s.unescaped().len() == 1,
+        None => false,
     }
 }
 
-/// Check if the receiver is a range (Irange or Erange).
-/// Also handles parenthesized ranges: `(1..10)` parses as `Begin(Irange(...))`.
-pub fn receiver_is_range(recv: &Option<Box<Node>>) -> bool {
-    match recv.as_deref() {
-        Some(Node::Irange(_) | Node::Erange(_)) => true,
-        Some(Node::Begin(b)) => {
-            b.statements.len() == 1 && matches!(b.statements[0], Node::Irange(_) | Node::Erange(_))
+/// Check if the receiver is a range (RangeNode, inclusive or exclusive).
+/// Also handles parenthesized ranges: `(1..10)` parses as `ParenthesesNode(RangeNode)`.
+pub fn receiver_is_range(recv: &Option<Node<'_>>) -> bool {
+    match recv {
+        Some(node) => {
+            if node.as_range_node().is_some() {
+                return true;
+            }
+            if let Some(paren) = node.as_parentheses_node()
+                && let Some(body) = paren.body()
+            {
+                if let Some(stmts) = body.as_statements_node() {
+                    let body_nodes: Vec<_> = stmts.body().iter().collect();
+                    return body_nodes.len() == 1 && body_nodes[0].as_range_node().is_some();
+                }
+                return body.as_range_node().is_some();
+            }
+            false
         }
-        _ => false,
+        None => false,
     }
 }
 
 /// Check if a node is a literal/primitive (not a variable reference or method call).
-pub fn is_primitive(node: &Node) -> bool {
+pub fn is_primitive(node: &Node<'_>) -> bool {
     matches!(
         node,
-        Node::Int(_)
-            | Node::Float(_)
-            | Node::Str(_)
-            | Node::Sym(_)
-            | Node::True(_)
-            | Node::False(_)
-            | Node::Nil(_)
-            | Node::Array(_)
-            | Node::Hash(_)
-            | Node::Irange(_)
-            | Node::Erange(_)
-            | Node::Rational(_)
-            | Node::Complex(_)
+        Node::IntegerNode { .. }
+            | Node::FloatNode { .. }
+            | Node::StringNode { .. }
+            | Node::SymbolNode { .. }
+            | Node::TrueNode { .. }
+            | Node::FalseNode { .. }
+            | Node::NilNode { .. }
+            | Node::ArrayNode { .. }
+            | Node::HashNode { .. }
+            | Node::RangeNode { .. }
+            | Node::RationalNode { .. }
+            | Node::ImaginaryNode { .. }
     )
 }
 
-/// Check if the first argument to a Send is a Hash/Kwargs node with exactly one key-value pair.
-/// `h.merge!(item: 1)` parses as Kwargs, `h.merge!({item: 1})` parses as Hash.
-pub fn first_arg_is_single_pair_hash(args: &[Node]) -> bool {
+/// Check if the first argument is a Hash/KeywordHash node with exactly one key-value pair.
+/// `h.merge!(item: 1)` parses as KeywordHashNode, `h.merge!({item: 1})` parses as HashNode.
+pub fn first_arg_is_single_pair_hash(args: &[Node<'_>]) -> bool {
     match args.first() {
-        Some(Node::Hash(h)) => h.pairs.len() == 1,
-        Some(Node::Kwargs(k)) => k.pairs.len() == 1,
-        _ => false,
-    }
-}
-
-/// Check if a node is an Int with value 1.
-pub fn is_int_one(node: &Node) -> bool {
-    match node {
-        Node::Int(i) => i.value == "1",
-        _ => false,
-    }
-}
-
-/// Get block argument names from Args node.
-pub fn block_arg_names(args: &Option<Box<Node>>) -> Vec<String> {
-    match args.as_deref() {
-        Some(Node::Args(a)) => a
-            .args
-            .iter()
-            .filter_map(|arg| match arg {
-                Node::Arg(a) => Some(a.name.clone()),
-                Node::Procarg0(p) => match p.args.as_slice() {
-                    [Node::Arg(a)] => Some(a.name.clone()),
-                    _ => None,
-                },
-                _ => None,
-            })
-            .collect(),
-        _ => Vec::new(),
-    }
-}
-
-/// Check if a Def node has a block argument (&block), returning its name if so.
-pub fn def_block_arg_name(def: &Def) -> Option<String> {
-    let args_node = def.args.as_deref()?;
-    if let Node::Args(args) = args_node {
-        for arg in &args.args {
-            if let Node::Blockarg(ba) = arg {
-                return ba.name.clone();
+        Some(node) => {
+            if let Some(h) = node.as_hash_node() {
+                return h.elements().iter().count() == 1;
             }
+            if let Some(k) = node.as_keyword_hash_node() {
+                return k.elements().iter().count() == 1;
+            }
+            false
         }
-    }
-    None
-}
-
-/// Count regular (non-optional, non-keyword, non-rest, non-block) arguments in a Def.
-pub fn def_regular_arg_count(def: &Def) -> usize {
-    match def.args.as_deref() {
-        Some(Node::Args(args)) => args
-            .args
-            .iter()
-            .filter(|a| matches!(a, Node::Arg(_)))
-            .count(),
-        _ => 0,
+        None => false,
     }
 }
 
-/// Get the first regular argument name from a Def.
-pub fn def_first_arg_name(def: &Def) -> Option<String> {
-    match def.args.as_deref() {
-        Some(Node::Args(args)) => args.args.iter().find_map(|a| match a {
-            Node::Arg(arg) => Some(arg.name.clone()),
-            _ => None,
-        }),
-        _ => None,
+/// Check if a node is an IntegerNode with value 1.
+pub fn is_int_one(node: &Node<'_>) -> bool {
+    if let Some(i) = node.as_integer_node() {
+        // Check the location text as a reliable way to get the value
+        let text = i.location().as_slice();
+        text == b"1"
+    } else {
+        false
     }
+}
+
+/// Get block argument names from a BlockNode's parameters.
+/// BlockNode.parameters() returns Option<Node> which is typically a BlockParametersNode.
+pub fn block_arg_names(params: &Option<Node<'_>>) -> Vec<String> {
+    match params {
+        Some(node) => {
+            if let Some(block_params) = node.as_block_parameters_node()
+                && let Some(inner_params) = block_params.parameters()
+            {
+                return inner_params
+                    .requireds()
+                    .iter()
+                    .filter_map(|p| {
+                        p.as_required_parameter_node()
+                            .map(|rp| String::from_utf8_lossy(rp.name().as_slice()).to_string())
+                    })
+                    .collect();
+            }
+            // Handle NumberedParametersNode or other cases
+            Vec::new()
+        }
+        None => Vec::new(),
+    }
+}
+
+/// Check if a DefNode has a block argument (&block), returning its name if so.
+pub fn def_block_arg_name(def: &ruby_prism::DefNode<'_>) -> Option<String> {
+    let params = def.parameters()?;
+    let block_param = params.block()?;
+    let name = block_param.name()?;
+    Some(String::from_utf8_lossy(name.as_slice()).to_string())
+}
+
+/// Count regular (required) arguments in a DefNode.
+pub fn def_regular_arg_count(def: &ruby_prism::DefNode<'_>) -> usize {
+    match def.parameters() {
+        Some(params) => params.requireds().iter().count(),
+        None => 0,
+    }
+}
+
+/// Get the first regular argument name from a DefNode.
+pub fn def_first_arg_name(def: &ruby_prism::DefNode<'_>) -> Option<String> {
+    let params = def.parameters()?;
+    let first = params.requireds().iter().next()?;
+    first
+        .as_required_parameter_node()
+        .map(|rp| String::from_utf8_lossy(rp.name().as_slice()).to_string())
 }
 
 /// Check if a string literal contains "def".
-pub fn str_contains_def(node: &Node) -> bool {
-    match node {
-        Node::Str(s) => s.value.to_string_lossy().contains("def"),
-        Node::Heredoc(h) => h.parts.iter().any(|part| match part {
-            Node::Str(s) => s.value.to_string_lossy().contains("def"),
-            _ => false,
-        }),
-        _ => false,
+pub fn str_contains_def(node: &Node<'_>) -> bool {
+    if let Some(s) = node.as_string_node() {
+        return String::from_utf8_lossy(s.unescaped()).contains("def");
+    }
+    if let Some(interp) = node.as_interpolated_string_node() {
+        return interp.parts().iter().any(|part| {
+            if let Some(s) = part.as_string_node() {
+                String::from_utf8_lossy(s.unescaped()).contains("def")
+            } else {
+                false
+            }
+        });
+    }
+    false
+}
+
+/// Get the number of top-level expressions in a body node, and optionally the single expression.
+/// Returns (count, Option<single_node>) — the option is Some only when count == 1.
+pub fn body_single_expression<'pr>(body: &Option<Node<'pr>>) -> (usize, Option<Node<'pr>>) {
+    match body {
+        None => (0, None),
+        Some(node) => {
+            if let Some(stmts) = node.as_statements_node() {
+                let body_nodes: Vec<_> = stmts.body().iter().collect();
+                let count = body_nodes.len();
+                if count == 1 {
+                    (1, Some(body_nodes.into_iter().next().unwrap()))
+                } else {
+                    (count, None)
+                }
+            } else {
+                // Single expression body (no StatementsNode wrapper).
+                // We need to return the node itself. Since prism's Node is just
+                // a thin wrapper around pointers, we can reconstruct it from the body.
+                // Re-access from the parent to get an owned Node.
+                (1, body.as_ref().map(|n| reconstruct_node_from_body(n)))
+            }
+        }
     }
 }
 
-/// Get expressions from a body node. If it's a Begin, return its statements.
-/// Otherwise return a single-element slice-like iterator.
-pub fn body_expressions(body: &Option<Box<Node>>) -> Vec<&Node> {
-    match body.as_deref() {
+/// Helper: given a reference to a Node, produce a new owned Node with the same data.
+/// This works because ruby_prism Node variants are just (parser, pointer, marker) tuples
+/// and the data is borrowed from the parse result, not owned.
+fn reconstruct_node_from_body<'pr>(node: &Node<'pr>) -> Node<'pr> {
+    // The body_expressions approach doesn't work because Node isn't Clone.
+    // Instead, callers should re-call body() to get a fresh owned Node.
+    // This function exists as a workaround: since all callers already have
+    // the def/body, they can just re-call .body() to get an owned Node.
+    //
+    // For now, we'll use unsafe to transmute since the Node is just pointers.
+    // Safety: Node<'pr> is a repr(C)-like enum of (parser, pointer, marker)
+    // and the lifetime is tied to the ParseResult. Copying the pointer data is safe
+    // as long as the ParseResult outlives the copy.
+    unsafe { std::ptr::read(node as *const Node<'pr>) }
+}
+
+/// Get expressions from a body node. If it's a StatementsNode, return its body items.
+/// Otherwise return a single-element vec.
+/// IMPORTANT: Caller must ensure `body` outlives the returned Vec.
+pub fn body_expressions<'pr>(body: &Option<Node<'pr>>) -> Vec<Node<'pr>> {
+    match body {
         None => vec![],
-        Some(Node::Begin(b)) => b.statements.iter().collect(),
-        Some(node) => vec![node],
-    }
-}
-
-/// Build ParserOptions with a custom decoder that handles ASCII/US-ASCII encodings.
-/// The lib_ruby_parser only supports UTF-8 and ASCII-8BIT out of the box.
-/// Since ASCII is a subset of UTF-8, we pass the bytes through unchanged.
-pub fn parser_options() -> ParserOptions {
-    let decoder = Decoder::new(Box::new(|encoding: String, input: Vec<u8>| match encoding
-        .to_uppercase()
-        .as_str()
-    {
-        "ASCII" | "US-ASCII" => DecoderResult::Ok(input),
-        _ => DecoderResult::Err(lib_ruby_parser::source::InputError::UnsupportedEncoding(
-            encoding,
-        )),
-    }));
-    ParserOptions {
-        decoder: Some(decoder),
-        ..Default::default()
+        Some(node) => {
+            if let Some(stmts) = node.as_statements_node() {
+                stmts.body().iter().collect()
+            } else {
+                vec![reconstruct_node_from_body(node)]
+            }
+        }
     }
 }
 
@@ -214,12 +270,15 @@ pub fn compute_newline_positions(source: &[u8]) -> Vec<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lib_ruby_parser::Parser;
 
-    fn parse(source: &[u8]) -> Option<Box<Node>> {
-        Parser::new(source.to_vec(), Default::default())
-            .do_parse()
-            .ast
+    fn parse_first_stmt(source: &'static [u8]) -> Node<'static> {
+        // Leak the parse result to get a 'static lifetime for tests
+        let result = ruby_prism::parse(source);
+        let result = Box::leak(Box::new(result));
+        let program = result.node();
+        let prog = program.as_program_node().unwrap();
+        let stmts: Vec<_> = prog.statements().body().iter().collect();
+        stmts.into_iter().next().unwrap()
     }
 
     #[test]
@@ -238,165 +297,153 @@ mod tests {
     }
 
     #[test]
-    fn receiver_is_send_with_name_works() {
-        let ast = parse(b"a.foo.bar").unwrap();
-        if let Node::Send(s) = ast.as_ref() {
-            assert!(receiver_is_send_with_name(&s.recv, "foo"));
-            assert!(!receiver_is_send_with_name(&s.recv, "baz"));
-        }
+    fn receiver_is_call_with_name_works() {
+        let node = parse_first_stmt(b"a.foo.bar");
+        let call = node.as_call_node().unwrap();
+        assert!(receiver_is_call_with_name(&call.receiver(), b"foo"));
+        assert!(!receiver_is_call_with_name(&call.receiver(), b"baz"));
     }
 
     #[test]
-    fn receiver_is_send_with_name_none() {
-        assert!(!receiver_is_send_with_name(&None, "foo"));
+    fn receiver_is_call_with_name_none() {
+        assert!(!receiver_is_call_with_name(&None, b"foo"));
     }
 
     #[test]
-    fn receiver_as_send_works() {
-        let ast = parse(b"a.foo.bar").unwrap();
-        if let Node::Send(s) = ast.as_ref() {
-            let inner = receiver_as_send(&s.recv).unwrap();
-            assert_eq!(inner.method_name, "foo");
-        }
+    fn receiver_as_call_works() {
+        let node = parse_first_stmt(b"a.foo.bar");
+        let call = node.as_call_node().unwrap();
+        let recv = call.receiver();
+        let inner = receiver_as_call(&recv).unwrap();
+        assert_eq!(inner.name().as_slice(), b"foo");
     }
 
     #[test]
-    fn receiver_as_send_not_send() {
-        assert!(receiver_as_send(&None).is_none());
-    }
-
-    #[test]
-    fn block_call_as_send_works() {
-        let ast = parse(b"arr.map { |x| x }").unwrap();
-        if let Node::Block(b) = ast.as_ref() {
-            let send = block_call_as_send(b).unwrap();
-            assert_eq!(send.method_name, "map");
-        }
+    fn receiver_as_call_not_call() {
+        assert!(receiver_as_call(&None).is_none());
     }
 
     #[test]
     fn has_block_pass_works() {
-        let ast = parse(b"arr.map(&:to_s)").unwrap();
-        if let Node::Send(s) = ast.as_ref() {
-            assert!(has_block_pass(&s.args));
-        }
+        let node = parse_first_stmt(b"arr.map(&:to_s)");
+        let call = node.as_call_node().unwrap();
+        assert!(has_block_pass(&call));
     }
 
     #[test]
     fn has_block_pass_without() {
-        let ast = parse(b"arr.map(1)").unwrap();
-        if let Node::Send(s) = ast.as_ref() {
-            assert!(!has_block_pass(&s.args));
-        }
+        let node = parse_first_stmt(b"arr.map(1)");
+        let call = node.as_call_node().unwrap();
+        assert!(!has_block_pass(&call));
     }
 
     #[test]
-    fn arg_count_without_block_pass_works() {
-        let ast = parse(b"arr.select(&:odd?).first").unwrap();
-        if let Node::Send(s) = ast.as_ref() {
-            assert_eq!(arg_count_without_block_pass(&s.args), 0);
-        }
+    fn arg_count_works() {
+        let node = parse_first_stmt(b"arr.select(1, 2)");
+        let call = node.as_call_node().unwrap();
+        assert_eq!(arg_count(&call), 2);
     }
 
     #[test]
     fn is_single_char_string_works() {
-        let ast = parse(b"'x'").unwrap();
-        assert!(is_single_char_string(&ast));
-        let ast2 = parse(b"'xy'").unwrap();
-        assert!(!is_single_char_string(&ast2));
+        let node = parse_first_stmt(b"'x'");
+        assert!(is_single_char_string(&node));
+        let node2 = parse_first_stmt(b"'xy'");
+        assert!(!is_single_char_string(&node2));
     }
 
     #[test]
     fn is_single_char_string_not_string() {
-        let ast = parse(b"42").unwrap();
-        assert!(!is_single_char_string(&ast));
+        let node = parse_first_stmt(b"42");
+        assert!(!is_single_char_string(&node));
     }
 
     #[test]
-    fn receiver_is_range_irange() {
-        let ast = parse(b"(1..10).include?(5)").unwrap();
-        if let Node::Send(s) = ast.as_ref() {
-            assert!(receiver_is_range(&s.recv));
-        }
+    fn receiver_is_range_inclusive() {
+        let node = parse_first_stmt(b"(1..10).include?(5)");
+        let call = node.as_call_node().unwrap();
+        assert!(receiver_is_range(&call.receiver()));
     }
 
     #[test]
-    fn receiver_is_range_erange() {
-        let ast = parse(b"(1...10).include?(5)").unwrap();
-        if let Node::Send(s) = ast.as_ref() {
-            assert!(receiver_is_range(&s.recv));
-        }
+    fn receiver_is_range_exclusive() {
+        let node = parse_first_stmt(b"(1...10).include?(5)");
+        let call = node.as_call_node().unwrap();
+        assert!(receiver_is_range(&call.receiver()));
     }
 
     #[test]
     fn receiver_is_range_not_range() {
-        let ast = parse(b"[1].include?(5)").unwrap();
-        if let Node::Send(s) = ast.as_ref() {
-            assert!(!receiver_is_range(&s.recv));
-        }
+        let node = parse_first_stmt(b"[1].include?(5)");
+        let call = node.as_call_node().unwrap();
+        assert!(!receiver_is_range(&call.receiver()));
     }
 
     #[test]
     fn is_primitive_covers_types() {
-        assert!(is_primitive(&parse(b"42").unwrap()));
-        assert!(is_primitive(&parse(b"3.14").unwrap()));
-        assert!(is_primitive(&parse(b"'s'").unwrap()));
-        assert!(is_primitive(&parse(b":sym").unwrap()));
-        assert!(is_primitive(&parse(b"true").unwrap()));
-        assert!(is_primitive(&parse(b"false").unwrap()));
-        assert!(is_primitive(&parse(b"nil").unwrap()));
-        assert!(is_primitive(&parse(b"[]").unwrap()));
-        assert!(is_primitive(&parse(b"{}").unwrap()));
-        assert!(is_primitive(&parse(b"1..5").unwrap()));
-        assert!(is_primitive(&parse(b"1...5").unwrap()));
-        assert!(!is_primitive(&parse(b"x").unwrap()));
+        assert!(is_primitive(&parse_first_stmt(b"42")));
+        assert!(is_primitive(&parse_first_stmt(b"3.14")));
+        assert!(is_primitive(&parse_first_stmt(b"'s'")));
+        assert!(is_primitive(&parse_first_stmt(b":sym")));
+        assert!(is_primitive(&parse_first_stmt(b"true")));
+        assert!(is_primitive(&parse_first_stmt(b"false")));
+        assert!(is_primitive(&parse_first_stmt(b"nil")));
+        assert!(is_primitive(&parse_first_stmt(b"[]")));
+        assert!(is_primitive(&parse_first_stmt(b"{}")));
+        assert!(is_primitive(&parse_first_stmt(b"1..5")));
+        assert!(is_primitive(&parse_first_stmt(b"1...5")));
+        assert!(!is_primitive(&parse_first_stmt(b"x")));
     }
 
     #[test]
     fn first_arg_is_single_pair_hash_kwargs() {
-        let ast = parse(b"h.merge!(a: 1)").unwrap();
-        if let Node::Send(s) = ast.as_ref() {
-            assert!(first_arg_is_single_pair_hash(&s.args));
-        }
+        let node = parse_first_stmt(b"h.merge!(a: 1)");
+        let call = node.as_call_node().unwrap();
+        let args = call_args(&call);
+        assert!(first_arg_is_single_pair_hash(&args));
     }
 
     #[test]
     fn first_arg_is_single_pair_hash_explicit() {
-        let ast = parse(b"h.merge!({a: 1})").unwrap();
-        if let Node::Send(s) = ast.as_ref() {
-            assert!(first_arg_is_single_pair_hash(&s.args));
-        }
+        let node = parse_first_stmt(b"h.merge!({a: 1})");
+        let call = node.as_call_node().unwrap();
+        let args = call_args(&call);
+        assert!(first_arg_is_single_pair_hash(&args));
     }
 
     #[test]
     fn first_arg_is_single_pair_hash_multi() {
-        let ast = parse(b"h.merge!(a: 1, b: 2)").unwrap();
-        if let Node::Send(s) = ast.as_ref() {
-            assert!(!first_arg_is_single_pair_hash(&s.args));
-        }
+        let node = parse_first_stmt(b"h.merge!(a: 1, b: 2)");
+        let call = node.as_call_node().unwrap();
+        let args = call_args(&call);
+        assert!(!first_arg_is_single_pair_hash(&args));
     }
 
     #[test]
     fn first_arg_is_single_pair_hash_not_hash() {
-        let ast = parse(b"h.merge!(x)").unwrap();
-        if let Node::Send(s) = ast.as_ref() {
-            assert!(!first_arg_is_single_pair_hash(&s.args));
-        }
+        let node = parse_first_stmt(b"h.merge!(x)");
+        let call = node.as_call_node().unwrap();
+        let args = call_args(&call);
+        assert!(!first_arg_is_single_pair_hash(&args));
     }
 
     #[test]
     fn is_int_one_works() {
-        assert!(is_int_one(&parse(b"1").unwrap()));
-        assert!(!is_int_one(&parse(b"2").unwrap()));
-        assert!(!is_int_one(&parse(b"'1'").unwrap()));
+        assert!(is_int_one(&parse_first_stmt(b"1")));
+        assert!(!is_int_one(&parse_first_stmt(b"2")));
+        assert!(!is_int_one(&parse_first_stmt(b"'1'")));
     }
 
     #[test]
     fn block_arg_names_single() {
-        let ast = parse(b"arr.map { |x| x }").unwrap();
-        if let Node::Block(b) = ast.as_ref() {
-            let names = block_arg_names(&b.args);
+        let node = parse_first_stmt(b"arr.map { |x| x }");
+        let call = node.as_call_node().unwrap();
+        if let Some(Node::BlockNode { .. }) = call.block() {
+            let block = call.block().unwrap().as_block_node().unwrap();
+            let names = block_arg_names(&block.parameters());
             assert_eq!(names, vec!["x".to_string()]);
+        } else {
+            panic!("Expected BlockNode");
         }
     }
 
@@ -408,74 +455,68 @@ mod tests {
 
     #[test]
     fn def_block_arg_name_present() {
-        let ast = parse(b"def foo(&block); end").unwrap();
-        if let Node::Def(d) = ast.as_ref() {
-            assert_eq!(def_block_arg_name(d), Some("block".to_string()));
-        }
+        let node = parse_first_stmt(b"def foo(&block); end");
+        let def = node.as_def_node().unwrap();
+        assert_eq!(def_block_arg_name(&def), Some("block".to_string()));
     }
 
     #[test]
     fn def_block_arg_name_absent() {
-        let ast = parse(b"def foo(x); end").unwrap();
-        if let Node::Def(d) = ast.as_ref() {
-            assert_eq!(def_block_arg_name(d), None);
-        }
+        let node = parse_first_stmt(b"def foo(x); end");
+        let def = node.as_def_node().unwrap();
+        assert_eq!(def_block_arg_name(&def), None);
     }
 
     #[test]
     fn def_regular_arg_count_works() {
-        let ast = parse(b"def foo(a, b); end").unwrap();
-        if let Node::Def(d) = ast.as_ref() {
-            assert_eq!(def_regular_arg_count(d), 2);
-        }
+        let node = parse_first_stmt(b"def foo(a, b); end");
+        let def = node.as_def_node().unwrap();
+        assert_eq!(def_regular_arg_count(&def), 2);
     }
 
     #[test]
     fn def_regular_arg_count_no_args() {
-        let ast = parse(b"def foo; end").unwrap();
-        if let Node::Def(d) = ast.as_ref() {
-            assert_eq!(def_regular_arg_count(d), 0);
-        }
+        let node = parse_first_stmt(b"def foo; end");
+        let def = node.as_def_node().unwrap();
+        assert_eq!(def_regular_arg_count(&def), 0);
     }
 
     #[test]
     fn def_first_arg_name_works() {
-        let ast = parse(b"def foo(bar); end").unwrap();
-        if let Node::Def(d) = ast.as_ref() {
-            assert_eq!(def_first_arg_name(d), Some("bar".to_string()));
-        }
+        let node = parse_first_stmt(b"def foo(bar); end");
+        let def = node.as_def_node().unwrap();
+        assert_eq!(def_first_arg_name(&def), Some("bar".to_string()));
     }
 
     #[test]
     fn def_first_arg_name_no_args() {
-        let ast = parse(b"def foo; end").unwrap();
-        if let Node::Def(d) = ast.as_ref() {
-            assert_eq!(def_first_arg_name(d), None);
-        }
+        let node = parse_first_stmt(b"def foo; end");
+        let def = node.as_def_node().unwrap();
+        assert_eq!(def_first_arg_name(&def), None);
     }
 
     #[test]
     fn str_contains_def_in_string() {
-        let ast = parse(b"\"def foo\"").unwrap();
-        assert!(str_contains_def(&ast));
+        let node = parse_first_stmt(b"\"def foo\"");
+        assert!(str_contains_def(&node));
     }
 
     #[test]
     fn str_contains_def_no_def() {
-        let ast = parse(b"\"hello\"").unwrap();
-        assert!(!str_contains_def(&ast));
+        let node = parse_first_stmt(b"\"hello\"");
+        assert!(!str_contains_def(&node));
     }
 
     #[test]
     fn str_contains_def_not_string() {
-        let ast = parse(b"42").unwrap();
-        assert!(!str_contains_def(&ast));
+        let node = parse_first_stmt(b"42");
+        assert!(!str_contains_def(&node));
     }
 
     #[test]
     fn str_contains_def_heredoc() {
-        let ast = parse(b"<<~RUBY\ndef foo\nRUBY\n").unwrap();
-        assert!(str_contains_def(&ast));
+        let node = parse_first_stmt(b"<<~RUBY\ndef foo\nRUBY\n");
+        assert!(str_contains_def(&node));
     }
 
     #[test]
@@ -485,20 +526,18 @@ mod tests {
 
     #[test]
     fn body_expressions_single() {
-        let ast = parse(b"def foo; 42; end").unwrap();
-        if let Node::Def(d) = ast.as_ref() {
-            let exprs = body_expressions(&d.body);
-            assert_eq!(exprs.len(), 1);
-        }
+        let node = parse_first_stmt(b"def foo; 42; end");
+        let def = node.as_def_node().unwrap();
+        let exprs = body_expressions(&def.body());
+        assert_eq!(exprs.len(), 1);
     }
 
     #[test]
     fn body_expressions_begin() {
-        let ast = parse(b"def foo; 1; 2; 3; end").unwrap();
-        if let Node::Def(d) = ast.as_ref() {
-            let exprs = body_expressions(&d.body);
-            assert_eq!(exprs.len(), 3);
-        }
+        let node = parse_first_stmt(b"def foo; 1; 2; 3; end");
+        let def = node.as_def_node().unwrap();
+        let exprs = body_expressions(&def.body());
+        assert_eq!(exprs.len(), 3);
     }
 
     #[test]
@@ -519,27 +558,16 @@ mod tests {
     }
 
     #[test]
-    fn parser_options_handles_ascii_encoding() {
+    fn prism_handles_ascii_encoding() {
         let source = b"# encoding: ASCII\nx = 1\n";
-        let result = Parser::new(source.to_vec(), parser_options()).do_parse();
-        assert!(result.ast.is_some());
+        let result = ruby_prism::parse(source);
+        assert!(result.errors().next().is_none());
     }
 
     #[test]
-    fn parser_options_handles_us_ascii_encoding() {
+    fn prism_handles_us_ascii_encoding() {
         let source = b"# encoding: us-ascii\nx = 1\n";
-        let result = Parser::new(source.to_vec(), parser_options()).do_parse();
-        assert!(result.ast.is_some());
-    }
-
-    #[test]
-    fn parser_options_rejects_unknown_encoding() {
-        let source = b"# encoding: SHIFT_JIS\nx = 1\n";
-        let result = Parser::new(source.to_vec(), parser_options()).do_parse();
-        let has_encoding_error = result
-            .diagnostics
-            .iter()
-            .any(|d| format!("{:?}", d.message).contains("UnsupportedEncoding"));
-        assert!(has_encoding_error);
+        let result = ruby_prism::parse(source);
+        assert!(result.errors().next().is_none());
     }
 }
