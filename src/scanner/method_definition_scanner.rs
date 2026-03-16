@@ -1,7 +1,8 @@
 use ruby_prism::Node;
 
 use crate::ast_helpers::{
-    body_expressions, def_block_arg_name, def_first_arg_name, def_regular_arg_count,
+    body_expression_count, body_first_expression, def_block_arg_name, def_first_arg_name,
+    def_regular_arg_count,
 };
 use crate::ast_visitor::for_each_descendant;
 use crate::offense::{Offense, OffenseKind};
@@ -82,11 +83,14 @@ fn check_getter_vs_attr_reader(def: &ruby_prism::DefNode<'_>, offenses: &mut Vec
     }
     // Body must be a single ivar read matching @<method_name>
     let body = def.body();
-    let exprs = body_expressions(&body);
-    if exprs.len() != 1 {
+    if body_expression_count(&body) != 1 {
         return;
     }
-    if let Some(iv) = exprs[0].as_instance_variable_read_node() {
+    let single = body_first_expression(&body).or(body);
+    if let Some(iv) = single
+        .as_ref()
+        .and_then(|n| n.as_instance_variable_read_node())
+    {
         let ivar_name = String::from_utf8_lossy(iv.name().as_slice()).to_string();
         let expected_ivar = format!("@{}", def_name);
         if ivar_name == expected_ivar {
@@ -116,11 +120,14 @@ fn check_setter_vs_attr_writer(def: &ruby_prism::DefNode<'_>, offenses: &mut Vec
     };
     // Body must be a single ivar assignment
     let body = def.body();
-    let exprs = body_expressions(&body);
-    if exprs.len() != 1 {
+    if body_expression_count(&body) != 1 {
         return;
     }
-    if let Some(ia) = exprs[0].as_instance_variable_write_node() {
+    let single = body_first_expression(&body).or(body);
+    if let Some(ia) = single
+        .as_ref()
+        .and_then(|n| n.as_instance_variable_write_node())
+    {
         let ivar_name = String::from_utf8_lossy(ia.name().as_slice()).to_string();
         let expected_ivar = format!("@{}", base_name);
         if ivar_name != expected_ivar {

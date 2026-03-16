@@ -200,58 +200,32 @@ pub fn str_contains_def(node: &Node<'_>) -> bool {
     false
 }
 
-/// Get the number of top-level expressions in a body node, and optionally the single expression.
-/// Returns (count, Option<single_node>) — the option is Some only when count == 1.
-pub fn body_single_expression<'pr>(body: &Option<Node<'pr>>) -> (usize, Option<Node<'pr>>) {
+/// Count the number of top-level expressions in a body node.
+pub fn body_expression_count(body: &Option<Node<'_>>) -> usize {
     match body {
-        None => (0, None),
+        None => 0,
         Some(node) => {
             if let Some(stmts) = node.as_statements_node() {
-                let body_nodes: Vec<_> = stmts.body().iter().collect();
-                let count = body_nodes.len();
-                if count == 1 {
-                    (1, Some(body_nodes.into_iter().next().unwrap()))
-                } else {
-                    (count, None)
-                }
+                stmts.body().iter().count()
             } else {
-                // Single expression body (no StatementsNode wrapper).
-                // We need to return the node itself. Since prism's Node is just
-                // a thin wrapper around pointers, we can reconstruct it from the body.
-                // Re-access from the parent to get an owned Node.
-                (1, body.as_ref().map(|n| reconstruct_node_from_body(n)))
+                1
             }
         }
     }
 }
 
-/// Helper: given a reference to a Node, produce a new owned Node with the same data.
-/// This works because ruby_prism Node variants are just (parser, pointer, marker) tuples
-/// and the data is borrowed from the parse result, not owned.
-fn reconstruct_node_from_body<'pr>(node: &Node<'pr>) -> Node<'pr> {
-    // The body_expressions approach doesn't work because Node isn't Clone.
-    // Instead, callers should re-call body() to get a fresh owned Node.
-    // This function exists as a workaround: since all callers already have
-    // the def/body, they can just re-call .body() to get an owned Node.
-    //
-    // For now, we'll use unsafe to transmute since the Node is just pointers.
-    // Safety: Node<'pr> is a repr(C)-like enum of (parser, pointer, marker)
-    // and the lifetime is tied to the ParseResult. Copying the pointer data is safe
-    // as long as the ParseResult outlives the copy.
-    unsafe { std::ptr::read(node as *const Node<'pr>) }
-}
-
-/// Get expressions from a body node. If it's a StatementsNode, return its body items.
-/// Otherwise return a single-element vec.
-/// IMPORTANT: Caller must ensure `body` outlives the returned Vec.
-pub fn body_expressions<'pr>(body: &Option<Node<'pr>>) -> Vec<Node<'pr>> {
+/// Get the first expression from a body node (if any).
+/// The body must be re-obtained from the parent to produce an owned Node.
+pub fn body_first_expression<'pr>(body: &Option<Node<'pr>>) -> Option<Node<'pr>> {
     match body {
-        None => vec![],
+        None => None,
         Some(node) => {
             if let Some(stmts) = node.as_statements_node() {
-                stmts.body().iter().collect()
+                stmts.body().iter().next()
             } else {
-                vec![reconstruct_node_from_body(node)]
+                // Single expression body — caller should re-call parent.body()
+                // to get an owned Node. We can't clone the reference.
+                None
             }
         }
     }
@@ -520,24 +494,31 @@ mod tests {
     }
 
     #[test]
-    fn body_expressions_none() {
-        assert!(body_expressions(&None).is_empty());
+    fn body_expression_count_none() {
+        assert_eq!(body_expression_count(&None), 0);
     }
 
     #[test]
-    fn body_expressions_single() {
+    fn body_expression_count_single() {
         let node = parse_first_stmt(b"def foo; 42; end");
         let def = node.as_def_node().unwrap();
-        let exprs = body_expressions(&def.body());
-        assert_eq!(exprs.len(), 1);
+        assert_eq!(body_expression_count(&def.body()), 1);
     }
 
     #[test]
-    fn body_expressions_begin() {
+    fn body_expression_count_multiple() {
         let node = parse_first_stmt(b"def foo; 1; 2; 3; end");
         let def = node.as_def_node().unwrap();
-        let exprs = body_expressions(&def.body());
-        assert_eq!(exprs.len(), 3);
+        assert_eq!(body_expression_count(&def.body()), 3);
+    }
+
+    #[test]
+    fn body_first_expression_works() {
+        let node = parse_first_stmt(b"def foo; 42; end");
+        let def = node.as_def_node().unwrap();
+        let first = body_first_expression(&def.body());
+        assert!(first.is_some());
+        assert!(first.unwrap().as_integer_node().is_some());
     }
 
     #[test]

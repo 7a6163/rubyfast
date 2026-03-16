@@ -59,7 +59,9 @@ pub fn for_each_direct_child<'pr>(node: &Node<'pr>, f: &mut impl FnMut(&Node<'pr
         }
         Node::DefNode { .. } => {
             let n = node.as_def_node().unwrap();
-            // Skip parameters - they don't contain scannable code
+            if let Some(params) = n.parameters() {
+                f(&params.as_node());
+            }
             if let Some(body) = n.body() {
                 f(&body);
             }
@@ -82,7 +84,7 @@ pub fn for_each_direct_child<'pr>(node: &Node<'pr>, f: &mut impl FnMut(&Node<'pr
                 }
             }
             if let Some(rescue) = n.rescue_clause() {
-                visit_rescue_chain_children(&rescue, f);
+                visit_rescue_children(&rescue, f);
             }
             if let Some(else_clause) = n.else_clause()
                 && let Some(stmts) = else_clause.statements()
@@ -569,7 +571,7 @@ pub fn for_each_direct_child<'pr>(node: &Node<'pr>, f: &mut impl FnMut(&Node<'pr
     }
 }
 
-/// Visit children of a RescueNode.
+/// Visit children of a RescueNode and its chain of subsequent clauses.
 fn visit_rescue_children<'pr>(
     rescue: &ruby_prism::RescueNode<'pr>,
     f: &mut impl FnMut(&Node<'pr>),
@@ -587,27 +589,6 @@ fn visit_rescue_children<'pr>(
     }
     if let Some(subsequent) = rescue.subsequent() {
         visit_rescue_children(&subsequent, f);
-    }
-}
-
-/// Visit all descendants through a rescue chain (rescue -> subsequent -> ...).
-fn visit_rescue_chain_children<'pr>(
-    rescue: &ruby_prism::RescueNode<'pr>,
-    f: &mut impl FnMut(&Node<'pr>),
-) {
-    for exc in rescue.exceptions().iter() {
-        f(&exc);
-    }
-    if let Some(reference) = rescue.reference() {
-        f(&reference);
-    }
-    if let Some(stmts) = rescue.statements() {
-        for child in stmts.body().iter() {
-            f(&child);
-        }
-    }
-    if let Some(subsequent) = rescue.subsequent() {
-        visit_rescue_chain_children(&subsequent, f);
     }
 }
 
