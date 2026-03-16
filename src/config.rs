@@ -40,7 +40,7 @@ impl Config {
 
     /// Parse config from a YAML string.
     pub fn parse_yaml(yaml: &str) -> Result<Self> {
-        let raw: Option<RawConfig> = serde_yaml_ng::from_str(yaml)?;
+        let raw: Option<RawConfig> = serde_saphyr::from_str(yaml)?;
         let raw = raw.unwrap_or_default();
 
         let disabled_offenses = OffenseKind::all()
