@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.4] - 2026-03-16
+
+### Refactored
+
+- Extract AST visitor into dedicated `ast_visitor` module (`ast_helpers.rs`: 976 → ~370 lines)
+- Add `compute_newline_positions()` utility to eliminate 3 duplicated newline computation blocks
+- Consolidate output statistics formatting with shared `StatsParts` builder
+
 ## [1.2.3] - 2026-03-13
 
 ### Added

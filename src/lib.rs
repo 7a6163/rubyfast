@@ -1,5 +1,6 @@
 pub mod analyzer;
 pub mod ast_helpers;
+pub mod ast_visitor;
 pub mod cli;
 pub mod comment_directives;
 pub mod config;

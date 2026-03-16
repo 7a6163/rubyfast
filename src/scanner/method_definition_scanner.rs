@@ -48,7 +48,7 @@ fn node_contains_block_call(node: &Node, block_name: &str) -> bool {
         return true;
     }
     let mut found = false;
-    crate::ast_helpers::for_each_child(node, |child| {
+    crate::ast_visitor::for_each_child(node, |child| {
         if !found && node_contains_block_call(child, block_name) {
             found = true;
         }
@@ -123,7 +123,7 @@ fn check_setter_vs_attr_writer(def: &Def, offenses: &mut Vec<Offense>) {
 mod tests {
     use super::*;
 
-    use crate::ast_helpers::node_children;
+    use crate::ast_visitor::node_children;
 
     fn parse_and_scan(source: &[u8]) -> Vec<Offense> {
         let result = lib_ruby_parser::Parser::new(source.to_vec(), Default::default()).do_parse();

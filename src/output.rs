@@ -119,26 +119,56 @@ fn print_parse_errors(errors: &[ParseError]) {
     println!();
 }
 
+struct StatsParts {
+    files_str: String,
+    colored_offenses: String,
+    parse_errors_str: Option<String>,
+}
+
+impl StatsParts {
+    fn build(result: &TraversalResult) -> Self {
+        let files = result.files_inspected;
+        let offenses = result.total_offenses();
+        let parse_errors = result.parse_errors.len();
+
+        let files_str = format!("{} {} inspected", files, pluralize("file", files));
+        let offenses_str = format!("{} {} detected", offenses, pluralize("offense", offenses));
+        let colored_offenses = if offenses == 0 {
+            offenses_str.green().to_string()
+        } else {
+            offenses_str.red().to_string()
+        };
+        let parse_errors_str = if parse_errors > 0 {
+            Some(
+                format!(
+                    "{} unparsable {} found",
+                    parse_errors,
+                    pluralize("file", parse_errors)
+                )
+                .red()
+                .to_string(),
+            )
+        } else {
+            None
+        };
+
+        Self {
+            files_str,
+            colored_offenses,
+            parse_errors_str,
+        }
+    }
+}
+
 fn print_statistics(result: &TraversalResult) {
-    let files = result.files_inspected;
-    let offenses = result.total_offenses();
-    let parse_errors = result.parse_errors.len();
+    let stats = StatsParts::build(result);
+
     let fixable: usize = result
         .results
         .iter()
         .flat_map(|r| &r.offenses)
         .filter(|o| o.kind.is_fixable())
         .count();
-
-    let files_str = format!("{} {} inspected", files, pluralize("file", files));
-
-    let offenses_str = format!("{} {} detected", offenses, pluralize("offense", offenses));
-
-    let colored_offenses = if offenses == 0 {
-        offenses_str.green().to_string()
-    } else {
-        offenses_str.red().to_string()
-    };
 
     let fixable_hint = if fixable > 0 {
         format!(
@@ -154,24 +184,19 @@ fn print_statistics(result: &TraversalResult) {
         String::new()
     };
 
-    if parse_errors > 0 {
-        let errors_str = format!(
-            "{} unparsable {} found",
-            parse_errors,
-            pluralize("file", parse_errors)
-        );
+    if let Some(errors_str) = &stats.parse_errors_str {
         println!(
             "{}, {}, {}{}",
-            files_str.green(),
-            colored_offenses,
-            errors_str.red(),
+            stats.files_str.green(),
+            stats.colored_offenses,
+            errors_str,
             fixable_hint
         );
     } else {
         println!(
             "{}, {}{}",
-            files_str.green(),
-            colored_offenses,
+            stats.files_str.green(),
+            stats.colored_offenses,
             fixable_hint
         );
     }
@@ -228,7 +253,7 @@ fn filter_unfixable(result: &TraversalResult) -> TraversalResult {
 }
 
 fn print_fix_statistics(result: &TraversalResult, total_fixed: usize, total_errors: usize) {
-    let files = result.files_inspected;
+    let stats = StatsParts::build(result);
     let offenses = result.total_offenses();
     let fixable: usize = result
         .results
@@ -237,20 +262,11 @@ fn print_fix_statistics(result: &TraversalResult, total_fixed: usize, total_erro
         .filter(|o| o.fix.is_some())
         .count();
 
-    let files_str = format!("{} {} inspected", files, pluralize("file", files));
-    let offenses_str = format!("{} {} detected", offenses, pluralize("offense", offenses));
     let fixed_str = format!(
         "{} {} fixed",
         total_fixed,
         pluralize("offense", total_fixed)
     );
-
-    let colored_offenses = if offenses == 0 {
-        offenses_str.green().to_string()
-    } else {
-        offenses_str.red().to_string()
-    };
-
     let colored_fixed = if total_fixed > 0 {
         fixed_str.green().to_string()
     } else {
@@ -266,8 +282,8 @@ fn print_fix_statistics(result: &TraversalResult, total_fixed: usize, total_erro
         );
         println!(
             "{}, {}, {}, {}",
-            files_str.green(),
-            colored_offenses,
+            stats.files_str.green(),
+            stats.colored_offenses,
             colored_fixed,
             err_str.yellow()
         );
@@ -279,16 +295,16 @@ fn print_fix_statistics(result: &TraversalResult, total_fixed: usize, total_erro
         );
         println!(
             "{}, {}, {}, {}",
-            files_str.green(),
-            colored_offenses,
+            stats.files_str.green(),
+            stats.colored_offenses,
             colored_fixed,
             unfixable_str.yellow()
         );
     } else {
         println!(
             "{}, {}, {}",
-            files_str.green(),
-            colored_offenses,
+            stats.files_str.green(),
+            stats.colored_offenses,
             colored_fixed
         );
     }

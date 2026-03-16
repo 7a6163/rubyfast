@@ -417,7 +417,7 @@ fn check_block_vs_symbol_to_proc(send: &Send, block: &Block, offenses: &mut Vec<
 mod tests {
     use super::*;
 
-    use crate::ast_helpers::node_children;
+    use crate::ast_visitor::node_children;
 
     fn parse_and_collect(source: &[u8]) -> Vec<Offense> {
         let result = lib_ruby_parser::Parser::new(source.to_vec(), Default::default()).do_parse();

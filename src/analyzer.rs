@@ -2,7 +2,8 @@ use std::path::Path;
 
 use lib_ruby_parser::{ErrorLevel, Node, Parser};
 
-use crate::ast_helpers::{byte_offset_to_line, for_each_child};
+use crate::ast_helpers::{byte_offset_to_line, compute_newline_positions};
+use crate::ast_visitor::for_each_child;
 use crate::comment_directives::build_disabled_set;
 use crate::config::Config;
 use crate::offense::Offense;
@@ -32,12 +33,7 @@ pub fn analyze_file(path: &Path, config: &Config) -> Result<AnalysisResult, Pars
     })?;
 
     // Pre-compute newline positions before handing source to the parser
-    let newline_positions: Vec<usize> = source
-        .iter()
-        .enumerate()
-        .filter(|&(_, &b)| b == b'\n')
-        .map(|(i, _)| i)
-        .collect();
+    let newline_positions = compute_newline_positions(&source);
 
     let source_clone = source.clone();
     let result = Parser::new(source, Default::default()).do_parse();
@@ -152,21 +148,12 @@ fn walk_node(node: &Node, offenses: &mut Vec<Offense>, source: &[u8]) {
 
 #[cfg(test)]
 mod tests {
-    use crate::ast_helpers::byte_offset_to_line;
-
-    fn newline_positions(source: &[u8]) -> Vec<usize> {
-        source
-            .iter()
-            .enumerate()
-            .filter(|&(_, &b)| b == b'\n')
-            .map(|(i, _)| i)
-            .collect()
-    }
+    use crate::ast_helpers::{byte_offset_to_line, compute_newline_positions};
 
     #[test]
     fn byte_offset_to_line_works() {
         let source = b"line1\nline2\nline3";
-        let positions = newline_positions(source);
+        let positions = compute_newline_positions(source);
         assert_eq!(byte_offset_to_line(&positions, 0), 1);
         assert_eq!(byte_offset_to_line(&positions, 5), 1);
         assert_eq!(byte_offset_to_line(&positions, 6), 2);

@@ -234,12 +234,7 @@ mod tests {
     fn parse_and_build(source: &str) -> DisabledSet {
         let bytes = source.as_bytes().to_vec();
         let result = lib_ruby_parser::Parser::new(bytes.clone(), Default::default()).do_parse();
-        let newline_positions: Vec<usize> = bytes
-            .iter()
-            .enumerate()
-            .filter(|&(_, &b)| b == b'\n')
-            .map(|(i, _)| i)
-            .collect();
+        let newline_positions = crate::ast_helpers::compute_newline_positions(&bytes);
         build_disabled_set(&result.comments, &bytes, &newline_positions)
     }
 

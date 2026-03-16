@@ -38,7 +38,7 @@ fn is_no_method_error_const(node: &Node) -> bool {
 mod tests {
     use super::*;
 
-    use crate::ast_helpers::node_children;
+    use crate::ast_visitor::node_children;
 
     fn parse_and_find_rescue_bodies(source: &[u8]) -> Vec<Offense> {
         let result = lib_ruby_parser::Parser::new(source.to_vec(), Default::default()).do_parse();
