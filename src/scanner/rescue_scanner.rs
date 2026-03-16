@@ -33,11 +33,11 @@ fn is_no_method_error_const(node: &Node<'_>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast_helpers::test_helpers::leak_parse;
     use crate::ast_visitor::for_each_direct_child;
 
     fn parse_and_find_rescue_bodies(source: &[u8]) -> Vec<Offense> {
-        let result = ruby_prism::parse(source);
-        let result = Box::leak(Box::new(result));
+        let result = leak_parse(source);
         let mut offenses = Vec::new();
         collect_rescue_offenses(&result.node(), &mut offenses);
         offenses

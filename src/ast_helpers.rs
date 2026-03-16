@@ -126,9 +126,11 @@ pub fn first_arg_is_single_pair_hash(args: &[Node<'_>]) -> bool {
 /// Check if a node is an IntegerNode with value 1.
 pub fn is_int_one(node: &Node<'_>) -> bool {
     if let Some(i) = node.as_integer_node() {
-        // Check the location text as a reliable way to get the value
         let text = i.location().as_slice();
-        text == b"1"
+        matches!(
+            text,
+            b"1" | b"0x1" | b"0X1" | b"0b1" | b"0B1" | b"0o1" | b"0O1"
+        )
     } else {
         false
     }
@@ -231,6 +233,28 @@ pub fn body_first_expression<'pr>(body: &Option<Node<'pr>>) -> Option<Node<'pr>>
     }
 }
 
+/// Test-only helpers for parsing Ruby source with leaked lifetime.
+/// `Box::leak` is intentional: test processes reclaim all memory at exit.
+#[cfg(test)]
+pub mod test_helpers {
+    use ruby_prism::{Node, ParseResult};
+
+    /// Parse source and leak the result to get a `'static` lifetime for tests.
+    pub fn leak_parse(source: &[u8]) -> &'static ParseResult<'static> {
+        let owned: Vec<u8> = source.to_vec();
+        let static_source: &'static [u8] = Box::leak(owned.into_boxed_slice());
+        Box::leak(Box::new(ruby_prism::parse(static_source)))
+    }
+
+    /// Parse source and return the first top-level statement node.
+    pub fn parse_first_stmt(source: &[u8]) -> Node<'static> {
+        let result = leak_parse(source);
+        let program = result.node();
+        let prog = program.as_program_node().unwrap();
+        prog.statements().body().iter().next().unwrap()
+    }
+}
+
 /// Compute byte positions of all newline characters in source.
 pub fn compute_newline_positions(source: &[u8]) -> Vec<usize> {
     source
@@ -245,15 +269,7 @@ pub fn compute_newline_positions(source: &[u8]) -> Vec<usize> {
 mod tests {
     use super::*;
 
-    fn parse_first_stmt(source: &'static [u8]) -> Node<'static> {
-        // Leak the parse result to get a 'static lifetime for tests
-        let result = ruby_prism::parse(source);
-        let result = Box::leak(Box::new(result));
-        let program = result.node();
-        let prog = program.as_program_node().unwrap();
-        let stmts: Vec<_> = prog.statements().body().iter().collect();
-        stmts.into_iter().next().unwrap()
-    }
+    use crate::ast_helpers::test_helpers::parse_first_stmt;
 
     #[test]
     fn byte_offset_to_line_basic() {

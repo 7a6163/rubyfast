@@ -456,12 +456,12 @@ fn check_block_vs_symbol_to_proc(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast_helpers::test_helpers::leak_parse;
     use crate::ast_visitor::for_each_direct_child;
     use ruby_prism::Node;
 
     fn parse_and_collect(source: &[u8]) -> Vec<Offense> {
-        let result = ruby_prism::parse(source);
-        let result = Box::leak(Box::new(result));
+        let result = leak_parse(source);
         let mut offenses = Vec::new();
         let root = result.node();
         walk_for_offenses(&root, &mut offenses);

@@ -67,10 +67,10 @@ fn extract_trimmed(source: &[u8], start: usize, end: usize) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast_helpers::test_helpers::leak_parse;
 
     fn parse_first_for(source: &'static [u8]) -> ruby_prism::ForNode<'static> {
-        let result = ruby_prism::parse(source);
-        let result = Box::leak(Box::new(result));
+        let result = leak_parse(source);
         let program = result.node();
         let prog = program.as_program_node().unwrap();
         let stmts: Vec<_> = prog.statements().body().iter().collect();
@@ -92,7 +92,7 @@ mod tests {
         let source = b"for x in arr do\n  puts x\nend";
         let f = parse_first_for(source);
         let fix = build_fix(&f, source).unwrap();
-        let fixed = crate::fix::apply_fixes(source, &[fix]);
+        let (fixed, _) = crate::fix::apply_fixes(source, &[fix]);
         assert_eq!(
             String::from_utf8(fixed).unwrap(),
             "arr.each do |x|\n  puts x\nend"
@@ -104,7 +104,7 @@ mod tests {
         let source = b"for x in [1,2,3]; puts x; end";
         let f = parse_first_for(source);
         let fix = build_fix(&f, source).unwrap();
-        let fixed = crate::fix::apply_fixes(source, &[fix]);
+        let (fixed, _) = crate::fix::apply_fixes(source, &[fix]);
         let fixed_str = String::from_utf8(fixed).unwrap();
         assert!(fixed_str.starts_with("[1,2,3].each do |x|"));
     }
@@ -114,7 +114,7 @@ mod tests {
         let source = b"for x in arr\n  puts x\nend";
         let f = parse_first_for(source);
         let fix = build_fix(&f, source).unwrap();
-        let fixed = crate::fix::apply_fixes(source, &[fix]);
+        let (fixed, _) = crate::fix::apply_fixes(source, &[fix]);
         assert_eq!(
             String::from_utf8(fixed).unwrap(),
             "arr.each do |x|\n  puts x\nend"

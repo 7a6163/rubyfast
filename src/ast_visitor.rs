@@ -595,6 +595,7 @@ fn visit_rescue_children<'pr>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast_helpers::test_helpers::leak_parse;
 
     fn count_all_nodes(node: &Node<'_>) -> usize {
         let mut count = 1;
@@ -604,8 +605,7 @@ mod tests {
 
     #[test]
     fn visitor_counts_nodes() {
-        let result = ruby_prism::parse(b"a + b");
-        let result = Box::leak(Box::new(result));
+        let result = leak_parse(b"a + b");
         let total = count_all_nodes(&result.node());
         assert!(total > 1, "Expected multiple nodes, got {}", total);
     }
@@ -647,8 +647,7 @@ mod tests {
         ];
 
         for source in sources {
-            let result = ruby_prism::parse(source);
-            let result = Box::leak(Box::new(result));
+            let result = leak_parse(source);
             let total = count_all_nodes(&result.node());
             assert!(
                 total > 0,
@@ -663,8 +662,7 @@ mod tests {
         let leaf_sources: &[&[u8]] = &[b"42", b"3.14", b"'s'", b":sym", b"true", b"false", b"nil"];
 
         for source in leaf_sources {
-            let result = ruby_prism::parse(source);
-            let result = Box::leak(Box::new(result));
+            let result = leak_parse(source);
             let prog = result.node().as_program_node().unwrap();
             let node = prog.statements().body().iter().next().unwrap();
             let mut child_count = 0;

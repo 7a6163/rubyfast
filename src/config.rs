@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -18,7 +18,7 @@ struct RawConfig {
 /// Parsed configuration controlling which offenses to report and which paths to skip.
 #[derive(Debug, Clone, Default)]
 pub struct Config {
-    disabled_offenses: Vec<OffenseKind>,
+    disabled_offenses: HashSet<OffenseKind>,
     pub exclude_patterns: Vec<String>,
 }
 
@@ -40,7 +40,7 @@ impl Config {
 
     /// Parse config from a YAML string.
     pub fn parse_yaml(yaml: &str) -> Result<Self> {
-        let raw: Option<RawConfig> = serde_yaml::from_str(yaml)?;
+        let raw: Option<RawConfig> = serde_yaml_ng::from_str(yaml)?;
         let raw = raw.unwrap_or_default();
 
         let disabled_offenses = OffenseKind::all()

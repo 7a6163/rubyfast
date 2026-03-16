@@ -148,11 +148,11 @@ fn check_setter_vs_attr_writer(def: &ruby_prism::DefNode<'_>, offenses: &mut Vec
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast_helpers::test_helpers::leak_parse;
     use crate::ast_visitor::for_each_direct_child;
 
     fn parse_and_scan(source: &[u8]) -> Vec<Offense> {
-        let result = ruby_prism::parse(source);
-        let result = Box::leak(Box::new(result));
+        let result = leak_parse(source);
         let mut offenses = Vec::new();
         collect_def_offenses(&result.node(), &mut offenses);
         offenses
