@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.2.5] - 2026-03-16
+
+### Fixed
+
+- Handle `# encoding: ASCII` and `# encoding: us-ascii` magic comments in Ruby files
+  that previously caused `UnsupportedEncoding` parse errors
+
+### Changed
+
+- Upgrade `colored` dependency from 2.x to 3.x
+
 ## [1.2.4] - 2026-03-16
 
 ### Refactored

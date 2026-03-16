@@ -2,6 +2,8 @@ use std::path::Path;
 
 use lib_ruby_parser::{ErrorLevel, Parser};
 
+use crate::ast_helpers::parser_options;
+
 /// A single byte-range replacement in a source file.
 #[derive(Debug, Clone)]
 pub struct Replacement {
@@ -78,7 +80,7 @@ pub fn apply_fixes(source: &[u8], fixes: &[Fix]) -> Vec<u8> {
 
 /// Verify that the given source parses without fatal errors.
 pub fn verify_syntax(source: &[u8]) -> bool {
-    let result = Parser::new(source.to_vec(), Default::default()).do_parse();
+    let result = Parser::new(source.to_vec(), parser_options()).do_parse();
     !result
         .diagnostics
         .iter()

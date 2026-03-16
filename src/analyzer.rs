@@ -2,7 +2,7 @@ use std::path::Path;
 
 use lib_ruby_parser::{ErrorLevel, Node, Parser};
 
-use crate::ast_helpers::{byte_offset_to_line, compute_newline_positions};
+use crate::ast_helpers::{byte_offset_to_line, compute_newline_positions, parser_options};
 use crate::ast_visitor::for_each_child;
 use crate::comment_directives::build_disabled_set;
 use crate::config::Config;
@@ -36,7 +36,7 @@ pub fn analyze_file(path: &Path, config: &Config) -> Result<AnalysisResult, Pars
     let newline_positions = compute_newline_positions(&source);
 
     let source_clone = source.clone();
-    let result = Parser::new(source, Default::default()).do_parse();
+    let result = Parser::new(source, parser_options()).do_parse();
 
     // Check for fatal parse errors
     let has_errors = result
