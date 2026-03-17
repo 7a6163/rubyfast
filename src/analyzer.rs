@@ -338,7 +338,11 @@ mod tests {
             .iter()
             .filter(|o| o.kind == crate::offense::OffenseKind::ForLoopVsEach)
             .count();
-        assert!(for_count >= 2, "Expected at least 2 for_loop offenses in begin/else/ensure, got {}", for_count);
+        assert!(
+            for_count >= 2,
+            "Expected at least 2 for_loop offenses in begin/else/ensure, got {}",
+            for_count
+        );
     }
 
     #[test]
@@ -377,11 +381,7 @@ mod tests {
         // `def foo; bar rescue NoMethodError; end` should hit the RescueNode branch
         let dir = tempfile::TempDir::new().unwrap();
         let file = dir.path().join("test.rb");
-        std::fs::write(
-            &file,
-            "def foo\n  bar rescue NoMethodError\nend\n",
-        )
-        .unwrap();
+        std::fs::write(&file, "def foo\n  bar rescue NoMethodError\nend\n").unwrap();
         let config = crate::config::Config::default();
         let _result = super::analyze_file(&file, &config).unwrap();
         // Just ensuring the code path doesn't panic

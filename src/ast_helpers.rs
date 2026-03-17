@@ -87,8 +87,7 @@ pub fn receiver_is_range(recv: &Option<Node<'_>>) -> bool {
     let Some(body) = paren.body() else {
         return false;
     };
-    body_single_expression(Some(body))
-        .is_some_and(|expr| expr.as_range_node().is_some())
+    body_single_expression(Some(body)).is_some_and(|expr| expr.as_range_node().is_some())
 }
 
 /// Check if a node is a literal/primitive (not a variable reference or method call).

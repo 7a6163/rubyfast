@@ -941,17 +941,13 @@ mod tests {
 
     #[test]
     fn visitor_handles_begin_with_rescue_else_ensure() {
-        let result = leak_parse(
-            b"begin; 1; rescue StandardError => e; 2; else; 3; ensure; 4; end",
-        );
+        let result = leak_parse(b"begin; 1; rescue StandardError => e; 2; else; 3; ensure; 4; end");
         assert!(count_all_nodes(&result.node()) > 6);
     }
 
     #[test]
     fn visitor_handles_chained_rescue() {
-        let result = leak_parse(
-            b"begin; rescue TypeError; 1; rescue StandardError; 2; end",
-        );
+        let result = leak_parse(b"begin; rescue TypeError; 1; rescue StandardError; 2; end");
         assert!(count_all_nodes(&result.node()) > 4);
     }
 
