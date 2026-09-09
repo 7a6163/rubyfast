@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Security
+
+- Bump `crossbeam-epoch` to 0.9.21 (RUSTSEC-2026-0204) and `anyhow` to 1.0.104
+  (RUSTSEC-2026-0190)
+
 ### Fixed
 
 - `fetch_with_argument_vs_block` no longer fires when the default costs nothing to
