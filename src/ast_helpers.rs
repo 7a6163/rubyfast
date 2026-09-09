@@ -109,6 +109,32 @@ pub fn is_primitive(node: &Node<'_>) -> bool {
     )
 }
 
+/// Check if a node costs nothing to construct — literals that are already values
+/// (immediates, interned symbols) and constant reads.
+///
+/// Used by the `fetch` rule: fast-ruby documents, right next to the benchmark the
+/// rule comes from, that the block form only wins when the default has to be built.
+/// With a cheap default the argument form is the faster one.
+pub fn is_cheap_value(node: &Node<'_>) -> bool {
+    matches!(
+        node,
+        Node::TrueNode { .. }
+            | Node::FalseNode { .. }
+            | Node::NilNode { .. }
+            | Node::IntegerNode { .. }
+            | Node::FloatNode { .. }
+            | Node::RationalNode { .. }
+            | Node::ImaginaryNode { .. }
+            | Node::SymbolNode { .. }
+            | Node::ConstantReadNode { .. }
+            | Node::ConstantPathNode { .. }
+            | Node::LocalVariableReadNode { .. }
+            | Node::InstanceVariableReadNode { .. }
+            | Node::ClassVariableReadNode { .. }
+            | Node::GlobalVariableReadNode { .. }
+    )
+}
+
 /// Check if the first argument is a Hash/KeywordHash node with exactly one key-value pair.
 /// `h.merge!(item: 1)` parses as KeywordHashNode, `h.merge!({item: 1})` parses as HashNode.
 /// Check if the first argument of a CallNode is a Hash/KeywordHash with exactly one pair.
@@ -426,17 +452,21 @@ mod tests {
         assert!(!is_int_one(&parse_first_stmt(b"'1'")));
     }
 
+    /// Names of the block parameters of `source`'s first statement.
+    fn first_block_arg_names(source: &[u8]) -> Vec<String> {
+        let node = parse_first_stmt(source);
+        let call = node.as_call_node().expect("expected a CallNode");
+        let block = call.block().expect("expected a block");
+        let block = block.as_block_node().expect("expected a BlockNode");
+        block_arg_names(&block.parameters())
+    }
+
     #[test]
     fn block_arg_names_single() {
-        let node = parse_first_stmt(b"arr.map { |x| x }");
-        let call = node.as_call_node().unwrap();
-        if let Some(Node::BlockNode { .. }) = call.block() {
-            let block = call.block().unwrap().as_block_node().unwrap();
-            let names = block_arg_names(&block.parameters());
-            assert_eq!(names, vec!["x".to_string()]);
-        } else {
-            panic!("Expected BlockNode");
-        }
+        assert_eq!(
+            first_block_arg_names(b"arr.map { |x| x }"),
+            vec!["x".to_string()]
+        );
     }
 
     #[test]
@@ -649,25 +679,40 @@ mod tests {
 
     #[test]
     fn block_arg_names_multiple() {
-        let node = parse_first_stmt(b"arr.each_with_object([]) { |x, acc| x }");
-        let call = node.as_call_node().unwrap();
-        if let Some(ruby_prism::Node::BlockNode { .. }) = call.block() {
-            let block = call.block().unwrap().as_block_node().unwrap();
-            let names = block_arg_names(&block.parameters());
-            assert_eq!(names.len(), 2);
-        }
+        assert_eq!(
+            first_block_arg_names(b"arr.each_with_object([]) { |x, acc| x }").len(),
+            2
+        );
     }
 
     #[test]
     fn block_arg_names_numbered_params() {
         // Numbered parameters (_1) produce NumberedParametersNode, not BlockParametersNode
-        let node = parse_first_stmt(b"arr.map { _1.to_s }");
-        let call = node.as_call_node().unwrap();
-        if let Some(ruby_prism::Node::BlockNode { .. }) = call.block() {
-            let block = call.block().unwrap().as_block_node().unwrap();
-            let names = block_arg_names(&block.parameters());
-            assert!(names.is_empty());
-        }
+        assert!(first_block_arg_names(b"arr.map { _1.to_s }").is_empty());
+    }
+
+    #[test]
+    fn receiver_is_range_unparenthesized() {
+        assert!(receiver_is_range(&Some(parse_first_stmt(b"1..10"))));
+    }
+
+    #[test]
+    fn receiver_is_range_non_range_non_paren() {
+        assert!(!receiver_is_range(&Some(parse_first_stmt(b"42"))));
+    }
+
+    #[test]
+    fn receiver_is_range_empty_parentheses() {
+        assert!(!receiver_is_range(&Some(parse_first_stmt(b"()"))));
+    }
+
+    #[test]
+    fn body_helpers_on_non_statements_node() {
+        // A bare expression body (not wrapped in a StatementsNode) counts as one expression.
+        let node = parse_first_stmt(b"42");
+        assert_eq!(body_expression_count(&Some(node)), 1);
+        let node = parse_first_stmt(b"42");
+        assert!(body_single_expression(Some(node)).is_some());
     }
 
     #[test]

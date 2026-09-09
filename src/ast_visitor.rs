@@ -9,6 +9,32 @@ pub fn for_each_descendant<'pr>(node: &Node<'pr>, f: &mut impl FnMut(&Node<'pr>)
     });
 }
 
+/// Visit each statement of an optional StatementsNode.
+fn visit_stmts<'pr>(
+    stmts: Option<ruby_prism::StatementsNode<'pr>>,
+    f: &mut impl FnMut(&Node<'pr>),
+) {
+    let Some(stmts) = stmts else { return };
+    for child in stmts.body().iter() {
+        f(&child);
+    }
+}
+
+/// Visit each argument of an optional ArgumentsNode.
+fn visit_args<'pr>(args: Option<ruby_prism::ArgumentsNode<'pr>>, f: &mut impl FnMut(&Node<'pr>)) {
+    let Some(args) = args else { return };
+    for arg in args.arguments().iter() {
+        f(&arg);
+    }
+}
+
+/// Visit an optional child node.
+fn visit_opt<'pr>(node: Option<Node<'pr>>, f: &mut impl FnMut(&Node<'pr>)) {
+    if let Some(node) = node {
+        f(&node);
+    }
+}
+
 /// Iterate over direct children of a node, calling f for each.
 /// This is the core traversal function for ruby-prism nodes.
 ///
@@ -30,76 +56,40 @@ pub fn for_each_direct_child<'pr>(node: &Node<'pr>, f: &mut impl FnMut(&Node<'pr
         }
         Node::CallNode { .. } => {
             let n = node.as_call_node().unwrap();
-            if let Some(recv) = n.receiver() {
-                f(&recv);
-            }
-            if let Some(args) = n.arguments() {
-                for arg in args.arguments().iter() {
-                    f(&arg);
-                }
-            }
-            if let Some(block) = n.block() {
-                f(&block);
-            }
+            visit_opt(n.receiver(), f);
+            visit_args(n.arguments(), f);
+            visit_opt(n.block(), f);
         }
         Node::BlockNode { .. } => {
             let n = node.as_block_node().unwrap();
-            if let Some(params) = n.parameters() {
-                f(&params);
-            }
-            if let Some(body) = n.body() {
-                f(&body);
-            }
+            visit_opt(n.parameters(), f);
+            visit_opt(n.body(), f);
         }
         Node::BlockArgumentNode { .. } => {
             let n = node.as_block_argument_node().unwrap();
-            if let Some(expr) = n.expression() {
-                f(&expr);
-            }
+            visit_opt(n.expression(), f);
         }
         Node::DefNode { .. } => {
             let n = node.as_def_node().unwrap();
             if let Some(params) = n.parameters() {
                 f(&params.as_node());
             }
-            if let Some(body) = n.body() {
-                f(&body);
-            }
+            visit_opt(n.body(), f);
         }
         Node::ForNode { .. } => {
             let n = node.as_for_node().unwrap();
             f(&n.index());
             f(&n.collection());
-            if let Some(stmts) = n.statements() {
-                for child in stmts.body().iter() {
-                    f(&child);
-                }
-            }
+            visit_stmts(n.statements(), f);
         }
         Node::BeginNode { .. } => {
             let n = node.as_begin_node().unwrap();
-            if let Some(stmts) = n.statements() {
-                for child in stmts.body().iter() {
-                    f(&child);
-                }
-            }
+            visit_stmts(n.statements(), f);
             if let Some(rescue) = n.rescue_clause() {
                 visit_rescue_children(&rescue, f);
             }
-            if let Some(else_clause) = n.else_clause()
-                && let Some(stmts) = else_clause.statements()
-            {
-                for child in stmts.body().iter() {
-                    f(&child);
-                }
-            }
-            if let Some(ensure) = n.ensure_clause()
-                && let Some(stmts) = ensure.statements()
-            {
-                for child in stmts.body().iter() {
-                    f(&child);
-                }
-            }
+            visit_stmts(n.else_clause().and_then(|c| c.statements()), f);
+            visit_stmts(n.ensure_clause().and_then(|c| c.statements()), f);
         }
         Node::RescueNode { .. } => {
             let n = node.as_rescue_node().unwrap();
@@ -107,116 +97,64 @@ pub fn for_each_direct_child<'pr>(node: &Node<'pr>, f: &mut impl FnMut(&Node<'pr
         }
         Node::EnsureNode { .. } => {
             let n = node.as_ensure_node().unwrap();
-            if let Some(stmts) = n.statements() {
-                for child in stmts.body().iter() {
-                    f(&child);
-                }
-            }
+            visit_stmts(n.statements(), f);
         }
         Node::ElseNode { .. } => {
             let n = node.as_else_node().unwrap();
-            if let Some(stmts) = n.statements() {
-                for child in stmts.body().iter() {
-                    f(&child);
-                }
-            }
+            visit_stmts(n.statements(), f);
         }
         Node::IfNode { .. } => {
             let n = node.as_if_node().unwrap();
             f(&n.predicate());
-            if let Some(stmts) = n.statements() {
-                for child in stmts.body().iter() {
-                    f(&child);
-                }
-            }
-            if let Some(subsequent) = n.subsequent() {
-                f(&subsequent);
-            }
+            visit_stmts(n.statements(), f);
+            visit_opt(n.subsequent(), f);
         }
         Node::UnlessNode { .. } => {
             let n = node.as_unless_node().unwrap();
             f(&n.predicate());
-            if let Some(stmts) = n.statements() {
-                for child in stmts.body().iter() {
-                    f(&child);
-                }
-            }
-            if let Some(else_clause) = n.else_clause()
-                && let Some(stmts) = else_clause.statements()
-            {
-                for child in stmts.body().iter() {
-                    f(&child);
-                }
-            }
+            visit_stmts(n.statements(), f);
+            visit_stmts(n.else_clause().and_then(|c| c.statements()), f);
         }
         Node::WhileNode { .. } => {
             let n = node.as_while_node().unwrap();
             f(&n.predicate());
-            if let Some(stmts) = n.statements() {
-                for child in stmts.body().iter() {
-                    f(&child);
-                }
-            }
+            visit_stmts(n.statements(), f);
         }
         Node::UntilNode { .. } => {
             let n = node.as_until_node().unwrap();
             f(&n.predicate());
-            if let Some(stmts) = n.statements() {
-                for child in stmts.body().iter() {
-                    f(&child);
-                }
-            }
+            visit_stmts(n.statements(), f);
         }
         Node::CaseNode { .. } => {
             let n = node.as_case_node().unwrap();
-            if let Some(pred) = n.predicate() {
-                f(&pred);
-            }
+            visit_opt(n.predicate(), f);
             for condition in n.conditions().iter() {
                 f(&condition);
             }
-            if let Some(else_clause) = n.else_clause()
-                && let Some(stmts) = else_clause.statements()
-            {
-                for child in stmts.body().iter() {
-                    f(&child);
-                }
-            }
+            visit_stmts(n.else_clause().and_then(|c| c.statements()), f);
         }
         Node::WhenNode { .. } => {
             let n = node.as_when_node().unwrap();
             for cond in n.conditions().iter() {
                 f(&cond);
             }
-            if let Some(stmts) = n.statements() {
-                for child in stmts.body().iter() {
-                    f(&child);
-                }
-            }
+            visit_stmts(n.statements(), f);
         }
         Node::ClassNode { .. } => {
             let n = node.as_class_node().unwrap();
             f(&n.constant_path());
-            if let Some(superclass) = n.superclass() {
-                f(&superclass);
-            }
-            if let Some(body) = n.body() {
-                f(&body);
-            }
+            visit_opt(n.superclass(), f);
+            visit_opt(n.body(), f);
         }
         Node::ModuleNode { .. } => {
             let n = node.as_module_node().unwrap();
             f(&n.constant_path());
-            if let Some(body) = n.body() {
-                f(&body);
-            }
+            visit_opt(n.body(), f);
         }
         Node::SingletonClassNode { .. } => {
             let n = node.as_singleton_class_node().unwrap();
             f(&n.expression());
-            if let Some(body) = n.body() {
-                f(&body);
-            }
+            visit_opt(n.body(), f);
         }
         Node::AndNode { .. } => {
             let n = node.as_and_node().unwrap();
@@ -253,24 +191,16 @@ pub fn for_each_direct_child<'pr>(node: &Node<'pr>, f: &mut impl FnMut(&Node<'pr
         }
         Node::AssocSplatNode { .. } => {
             let n = node.as_assoc_splat_node().unwrap();
-            if let Some(value) = n.value() {
-                f(&value);
-            }
+            visit_opt(n.value(), f);
         }
         Node::RangeNode { .. } => {
             let n = node.as_range_node().unwrap();
-            if let Some(left) = n.left() {
-                f(&left);
-            }
-            if let Some(right) = n.right() {
-                f(&right);
-            }
+            visit_opt(n.left(), f);
+            visit_opt(n.right(), f);
         }
         Node::ParenthesesNode { .. } => {
             let n = node.as_parentheses_node().unwrap();
-            if let Some(body) = n.body() {
-                f(&body);
-            }
+            visit_opt(n.body(), f);
         }
         Node::InterpolatedStringNode { .. } => {
             let n = node.as_interpolated_string_node().unwrap();
@@ -286,11 +216,7 @@ pub fn for_each_direct_child<'pr>(node: &Node<'pr>, f: &mut impl FnMut(&Node<'pr
         }
         Node::EmbeddedStatementsNode { .. } => {
             let n = node.as_embedded_statements_node().unwrap();
-            if let Some(stmts) = n.statements() {
-                for child in stmts.body().iter() {
-                    f(&child);
-                }
-            }
+            visit_stmts(n.statements(), f);
         }
         Node::LocalVariableWriteNode { .. } => {
             let n = node.as_local_variable_write_node().unwrap();
@@ -319,18 +245,14 @@ pub fn for_each_direct_child<'pr>(node: &Node<'pr>, f: &mut impl FnMut(&Node<'pr
         }
         Node::ConstantPathNode { .. } => {
             let n = node.as_constant_path_node().unwrap();
-            if let Some(parent) = n.parent() {
-                f(&parent);
-            }
+            visit_opt(n.parent(), f);
         }
         Node::MultiWriteNode { .. } => {
             let n = node.as_multi_write_node().unwrap();
             for target in n.lefts().iter() {
                 f(&target);
             }
-            if let Some(rest) = n.rest() {
-                f(&rest);
-            }
+            visit_opt(n.rest(), f);
             for target in n.rights().iter() {
                 f(&target);
             }
@@ -338,45 +260,25 @@ pub fn for_each_direct_child<'pr>(node: &Node<'pr>, f: &mut impl FnMut(&Node<'pr
         }
         Node::SplatNode { .. } => {
             let n = node.as_splat_node().unwrap();
-            if let Some(expr) = n.expression() {
-                f(&expr);
-            }
+            visit_opt(n.expression(), f);
         }
         Node::ReturnNode { .. } => {
             let n = node.as_return_node().unwrap();
-            if let Some(args) = n.arguments() {
-                for arg in args.arguments().iter() {
-                    f(&arg);
-                }
-            }
+            visit_args(n.arguments(), f);
         }
         Node::YieldNode { .. } => {
             let n = node.as_yield_node().unwrap();
-            if let Some(args) = n.arguments() {
-                for arg in args.arguments().iter() {
-                    f(&arg);
-                }
-            }
+            visit_args(n.arguments(), f);
         }
         Node::SuperNode { .. } => {
             let n = node.as_super_node().unwrap();
-            if let Some(args) = n.arguments() {
-                for arg in args.arguments().iter() {
-                    f(&arg);
-                }
-            }
-            if let Some(block) = n.block() {
-                f(&block);
-            }
+            visit_args(n.arguments(), f);
+            visit_opt(n.block(), f);
         }
         Node::LambdaNode { .. } => {
             let n = node.as_lambda_node().unwrap();
-            if let Some(params) = n.parameters() {
-                f(&params);
-            }
-            if let Some(body) = n.body() {
-                f(&body);
-            }
+            visit_opt(n.parameters(), f);
+            visit_opt(n.body(), f);
         }
         Node::DefinedNode { .. } => {
             let n = node.as_defined_node().unwrap();
@@ -400,44 +302,24 @@ pub fn for_each_direct_child<'pr>(node: &Node<'pr>, f: &mut impl FnMut(&Node<'pr
         }
         Node::CaseMatchNode { .. } => {
             let n = node.as_case_match_node().unwrap();
-            if let Some(pred) = n.predicate() {
-                f(&pred);
-            }
+            visit_opt(n.predicate(), f);
             for condition in n.conditions().iter() {
                 f(&condition);
             }
-            if let Some(else_clause) = n.else_clause()
-                && let Some(stmts) = else_clause.statements()
-            {
-                for child in stmts.body().iter() {
-                    f(&child);
-                }
-            }
+            visit_stmts(n.else_clause().and_then(|c| c.statements()), f);
         }
         Node::InNode { .. } => {
             let n = node.as_in_node().unwrap();
             f(&n.pattern());
-            if let Some(stmts) = n.statements() {
-                for child in stmts.body().iter() {
-                    f(&child);
-                }
-            }
+            visit_stmts(n.statements(), f);
         }
         Node::BreakNode { .. } => {
             let n = node.as_break_node().unwrap();
-            if let Some(args) = n.arguments() {
-                for arg in args.arguments().iter() {
-                    f(&arg);
-                }
-            }
+            visit_args(n.arguments(), f);
         }
         Node::NextNode { .. } => {
             let n = node.as_next_node().unwrap();
-            if let Some(args) = n.arguments() {
-                for arg in args.arguments().iter() {
-                    f(&arg);
-                }
-            }
+            visit_args(n.arguments(), f);
         }
         Node::AliasMethodNode { .. } => {
             let n = node.as_alias_method_node().unwrap();
@@ -532,38 +414,20 @@ pub fn for_each_direct_child<'pr>(node: &Node<'pr>, f: &mut impl FnMut(&Node<'pr
         }
         Node::IndexOperatorWriteNode { .. } => {
             let n = node.as_index_operator_write_node().unwrap();
-            if let Some(recv) = n.receiver() {
-                f(&recv);
-            }
-            if let Some(args) = n.arguments() {
-                for arg in args.arguments().iter() {
-                    f(&arg);
-                }
-            }
+            visit_opt(n.receiver(), f);
+            visit_args(n.arguments(), f);
             f(&n.value());
         }
         Node::IndexAndWriteNode { .. } => {
             let n = node.as_index_and_write_node().unwrap();
-            if let Some(recv) = n.receiver() {
-                f(&recv);
-            }
-            if let Some(args) = n.arguments() {
-                for arg in args.arguments().iter() {
-                    f(&arg);
-                }
-            }
+            visit_opt(n.receiver(), f);
+            visit_args(n.arguments(), f);
             f(&n.value());
         }
         Node::IndexOrWriteNode { .. } => {
             let n = node.as_index_or_write_node().unwrap();
-            if let Some(recv) = n.receiver() {
-                f(&recv);
-            }
-            if let Some(args) = n.arguments() {
-                for arg in args.arguments().iter() {
-                    f(&arg);
-                }
-            }
+            visit_opt(n.receiver(), f);
+            visit_args(n.arguments(), f);
             f(&n.value());
         }
         // Leaf nodes and remaining types — no children to visit
@@ -579,14 +443,8 @@ fn visit_rescue_children<'pr>(
     for exc in rescue.exceptions().iter() {
         f(&exc);
     }
-    if let Some(reference) = rescue.reference() {
-        f(&reference);
-    }
-    if let Some(stmts) = rescue.statements() {
-        for child in stmts.body().iter() {
-            f(&child);
-        }
-    }
+    visit_opt(rescue.reference(), f);
+    visit_stmts(rescue.statements(), f);
     if let Some(subsequent) = rescue.subsequent() {
         visit_rescue_children(&subsequent, f);
     }
@@ -595,7 +453,7 @@ fn visit_rescue_children<'pr>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast_helpers::test_helpers::leak_parse;
+    use crate::ast_helpers::test_helpers::{leak_parse, parse_first_stmt};
 
     fn count_all_nodes(node: &Node<'_>) -> usize {
         let mut count = 1;
@@ -649,12 +507,78 @@ mod tests {
         for source in sources {
             let result = leak_parse(source);
             let total = count_all_nodes(&result.node());
-            assert!(
-                total > 0,
-                "No nodes in AST for {:?}",
-                std::str::from_utf8(source)
-            );
+            assert!(total > 0);
         }
+    }
+
+    /// Every container arm must hand back its value child — a deleted arm silently
+    /// falls through to `_ => {}` and the walker stops descending there.
+    #[test]
+    fn container_nodes_expose_their_children() {
+        let cases: &[(&[u8], usize)] = &[
+            (b"a && b", 2),
+            (b"a || b", 2),
+            (b"alias foo bar", 2),
+            (b"alias $a $b", 2),
+            (b"defined?(x)", 1),
+            (b"@x = 1", 1),
+            (b"@@x = 1", 1),
+            (b"$x = 1", 1),
+            (b"X = 1", 1),
+            (b"A::B = 1", 1),
+            (b"x += 1", 1),
+            (b"x &&= 1", 1),
+            (b"x ||= 1", 1),
+            (b"@x += 1", 1),
+            (b"@x &&= 1", 1),
+            (b"@x ||= 1", 1),
+            (b"@@x += 1", 1),
+            (b"@@x &&= 1", 1),
+            (b"@@x ||= 1", 1),
+            (b"$x += 1", 1),
+            (b"$x &&= 1", 1),
+            (b"$x ||= 1", 1),
+            (b"X += 1", 1),
+            (b"X &&= 1", 1),
+            (b"X ||= 1", 1),
+            (b"A::B += 1", 1),
+            (b"A::B &&= 1", 1),
+            (b"A::B ||= 1", 1),
+        ];
+        for (source, expected) in cases {
+            let node = parse_first_stmt(source);
+            let mut count = 0;
+            for_each_direct_child(&node, &mut |_| count += 1);
+            assert_eq!((source, count), (source, *expected));
+        }
+    }
+
+    #[test]
+    fn else_node_exposes_its_statements() {
+        let node = parse_first_stmt(b"if a then 1 else 2 end");
+        let if_node = node.as_if_node().unwrap();
+        let else_node = if_node.subsequent().unwrap();
+        let mut count = 0;
+        for_each_direct_child(&else_node, &mut |_| count += 1);
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn visitor_handles_rescue_and_ensure_nodes_directly() {
+        let result = leak_parse(b"begin; foo; rescue E => e; bar; ensure; baz; end");
+        let program = result.node().as_program_node().unwrap();
+        let stmt = program.statements().body().iter().next().unwrap();
+        let begin = stmt.as_begin_node().unwrap();
+
+        let rescue = begin.rescue_clause().unwrap().as_node();
+        let mut n = 0;
+        for_each_direct_child(&rescue, &mut |_| n += 1);
+        assert!(n > 0);
+
+        let ensure = begin.ensure_clause().unwrap().as_node();
+        let mut n = 0;
+        for_each_direct_child(&ensure, &mut |_| n += 1);
+        assert!(n > 0);
     }
 
     #[test]
@@ -1406,12 +1330,7 @@ mod tests {
             let node = prog.statements().body().iter().next().unwrap();
             let mut child_count = 0;
             for_each_direct_child(&node, &mut |_| child_count += 1);
-            assert_eq!(
-                child_count,
-                0,
-                "Expected 0 children for {:?}",
-                std::str::from_utf8(source)
-            );
+            assert_eq!(child_count, 0);
         }
     }
 }

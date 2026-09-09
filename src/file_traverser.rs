@@ -70,13 +70,10 @@ fn collect_ruby_files(path: &Path) -> Vec<PathBuf> {
     // Escape glob metacharacters in the base path to avoid pattern errors
     let escaped = glob::Pattern::escape(&path.display().to_string());
     let pattern = format!("{}/**/*.rb", escaped);
-    match glob::glob(&pattern) {
-        Ok(paths) => paths.filter_map(|entry| entry.ok()).collect(),
-        Err(e) => {
-            eprintln!("Warning: invalid path pattern '{}': {}", pattern, e);
-            vec![]
-        }
-    }
+    // The pattern is escaped above, so it can never be invalid.
+    glob::glob(&pattern)
+        .map(|paths| paths.filter_map(|entry| entry.ok()).collect())
+        .unwrap_or_default()
 }
 
 /// Expand exclude patterns relative to a base path, pre-canonicalizing results.

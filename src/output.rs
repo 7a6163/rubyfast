@@ -9,17 +9,23 @@ use crate::offense::OffenseKind;
 
 /// Print analysis results using the selected output format.
 pub fn print_results(result: &TraversalResult, format: &OutputFormat) {
-    match format {
-        OutputFormat::File => print_results_by_file(result),
-        OutputFormat::Rule => print_results_by_rule(result),
-        OutputFormat::Plain => print_results_plain(result),
-    }
+    print!("{}", format_results(result, format));
+}
+
+/// Render analysis results using the selected output format.
+fn format_results(result: &TraversalResult, format: &OutputFormat) -> String {
+    let mut out = match format {
+        OutputFormat::File => format_results_by_file(result),
+        OutputFormat::Rule => format_results_by_rule(result),
+        OutputFormat::Plain => format_results_plain(result),
+    };
 
     if !result.parse_errors.is_empty() {
-        print_parse_errors(&result.parse_errors);
+        out.push_str(&format_parse_errors(&result.parse_errors));
     }
 
-    print_statistics(result);
+    out.push_str(&format_statistics(result));
+    out
 }
 
 /// `--format file` — group offenses by file path.
@@ -31,27 +37,29 @@ pub fn print_results(result: &TraversalResult, format: &OutputFormat) {
 /// tests/fixtures/19_for_loop.rb
 ///   L1   For loop is slower than using each (fixable)
 /// ```
-fn print_results_by_file(result: &TraversalResult) {
+fn format_results_by_file(result: &TraversalResult) -> String {
+    let mut out = String::new();
     for analysis in &result.results {
         if analysis.offenses.is_empty() {
             continue;
         }
-        println!("{}", analysis.path.bold());
+        out.push_str(&format!("{}\n", analysis.path.bold()));
         for offense in &analysis.offenses {
             let fixable_tag = if offense.kind.is_fixable() {
                 format!(" {}", "(fixable)".green())
             } else {
                 String::new()
             };
-            println!(
-                "  {}  {}{}",
+            out.push_str(&format!(
+                "  {}  {}{}\n",
                 format!("L{}", offense.line).cyan(),
                 offense.kind.explanation(),
                 fixable_tag
-            );
+            ));
         }
-        println!();
+        out.push('\n');
     }
+    out
 }
 
 /// `--format rule` — group offenses by rule kind.
@@ -61,7 +69,8 @@ fn print_results_by_file(result: &TraversalResult) {
 ///   app/controllers/api/v1/health_articles_controller.rb:11
 ///   app/controllers/concerns/lottery_common.rb:13
 /// ```
-fn print_results_by_rule(result: &TraversalResult) {
+fn format_results_by_rule(result: &TraversalResult) -> String {
+    let mut out = String::new();
     let mut grouped: BTreeMap<OffenseKind, Vec<(String, usize)>> = BTreeMap::new();
 
     for analysis in &result.results {
@@ -75,17 +84,18 @@ fn print_results_by_rule(result: &TraversalResult) {
 
     for (kind, locations) in &grouped {
         let count = locations.len();
-        println!(
-            "{} ({} {})",
+        out.push_str(&format!(
+            "{} ({} {})\n",
             kind.explanation().yellow(),
             count,
             pluralize("offense", count)
-        );
+        ));
         for (path, line) in locations {
-            println!("  {}:{}", path, line);
+            out.push_str(&format!("  {}:{}\n", path, line));
         }
-        println!();
+        out.push('\n');
     }
+    out
 }
 
 /// `--format plain` — one offense per line (original format, for grep/reviewdog).
@@ -93,30 +103,37 @@ fn print_results_by_rule(result: &TraversalResult) {
 /// ```text
 /// app/controllers/api/v1/health_articles_controller.rb:11 Hash#fetch with second argument ...
 /// ```
-fn print_results_plain(result: &TraversalResult) {
+fn format_results_plain(result: &TraversalResult) -> String {
+    let mut out = String::new();
     for analysis in &result.results {
         if analysis.offenses.is_empty() {
             continue;
         }
         for offense in &analysis.offenses {
             let location = format!("{}:{}", analysis.path, offense.line);
-            println!("{} {}.", location.red(), offense.kind.explanation());
+            out.push_str(&format!(
+                "{} {}.\n",
+                location.red(),
+                offense.kind.explanation()
+            ));
         }
-        println!();
+        out.push('\n');
     }
+    out
 }
 
-fn print_parse_errors(errors: &[ParseError]) {
-    println!(
+fn format_parse_errors(errors: &[ParseError]) -> String {
+    let mut out = String::from(
         "rubyfast was unable to process some files because the\n\
          internal parser is not able to read some characters or\n\
-         has timed out. Unprocessable files were:"
+         has timed out. Unprocessable files were:\n\
+         -----------------------------------------------------\n",
     );
-    println!("-----------------------------------------------------");
     for err in errors {
-        println!("{} - {}", err.path, err.message);
+        out.push_str(&format!("{} - {}\n", err.path, err.message));
     }
-    println!();
+    out.push('\n');
+    out
 }
 
 struct StatsParts {
@@ -160,7 +177,7 @@ impl StatsParts {
     }
 }
 
-fn print_statistics(result: &TraversalResult) {
+fn format_statistics(result: &TraversalResult) -> String {
     let stats = StatsParts::build(result);
 
     let fixable: usize = result
@@ -184,21 +201,20 @@ fn print_statistics(result: &TraversalResult) {
         String::new()
     };
 
-    if let Some(errors_str) = &stats.parse_errors_str {
-        println!(
-            "{}, {}, {}{}",
+    match &stats.parse_errors_str {
+        Some(errors_str) => format!(
+            "{}, {}, {}{}\n",
             stats.files_str.green(),
             stats.colored_offenses,
             errors_str,
             fixable_hint
-        );
-    } else {
-        println!(
-            "{}, {}{}",
+        ),
+        None => format!(
+            "{}, {}{}\n",
             stats.files_str.green(),
             stats.colored_offenses,
             fixable_hint
-        );
+        ),
     }
 }
 
@@ -209,19 +225,33 @@ pub fn print_fix_results(
     total_errors: usize,
     format: &OutputFormat,
 ) {
-    // Print unfixable offenses using the selected format
+    print!(
+        "{}",
+        format_fix_results(result, total_fixed, total_errors, format)
+    );
+}
+
+/// Render results when --fix mode is active.
+fn format_fix_results(
+    result: &TraversalResult,
+    total_fixed: usize,
+    total_errors: usize,
+    format: &OutputFormat,
+) -> String {
+    // Unfixable offenses are still reported, using the selected format
     let unfixable_result = filter_unfixable(result);
-    match format {
-        OutputFormat::File => print_results_by_file(&unfixable_result),
-        OutputFormat::Rule => print_results_by_rule(&unfixable_result),
-        OutputFormat::Plain => print_results_plain(&unfixable_result),
-    }
+    let mut out = match format {
+        OutputFormat::File => format_results_by_file(&unfixable_result),
+        OutputFormat::Rule => format_results_by_rule(&unfixable_result),
+        OutputFormat::Plain => format_results_plain(&unfixable_result),
+    };
 
     if !result.parse_errors.is_empty() {
-        print_parse_errors(&result.parse_errors);
+        out.push_str(&format_parse_errors(&result.parse_errors));
     }
 
-    print_fix_statistics(result, total_fixed, total_errors);
+    out.push_str(&format_fix_statistics(result, total_fixed, total_errors));
+    out
 }
 
 /// Build a TraversalResult containing only unfixable offenses.
@@ -252,7 +282,11 @@ fn filter_unfixable(result: &TraversalResult) -> TraversalResult {
     }
 }
 
-fn print_fix_statistics(result: &TraversalResult, total_fixed: usize, total_errors: usize) {
+fn format_fix_statistics(
+    result: &TraversalResult,
+    total_fixed: usize,
+    total_errors: usize,
+) -> String {
     let stats = StatsParts::build(result);
     let offenses = result.total_offenses();
     let fixable: usize = result
@@ -280,33 +314,33 @@ fn print_fix_statistics(result: &TraversalResult, total_fixed: usize, total_erro
             total_errors,
             pluralize("file", total_errors)
         );
-        println!(
-            "{}, {}, {}, {}",
+        format!(
+            "{}, {}, {}, {}\n",
             stats.files_str.green(),
             stats.colored_offenses,
             colored_fixed,
             err_str.yellow()
-        );
+        )
     } else if unfixable > 0 {
         let unfixable_str = format!(
             "{} {} cannot be auto-fixed",
             unfixable,
             pluralize("offense", unfixable)
         );
-        println!(
-            "{}, {}, {}, {}",
+        format!(
+            "{}, {}, {}, {}\n",
             stats.files_str.green(),
             stats.colored_offenses,
             colored_fixed,
             unfixable_str.yellow()
-        );
+        )
     } else {
-        println!(
-            "{}, {}, {}",
+        format!(
+            "{}, {}, {}\n",
             stats.files_str.green(),
             stats.colored_offenses,
             colored_fixed
-        );
+        )
     }
 }
 
@@ -347,6 +381,210 @@ mod tests {
         }
     }
 
+    fn make_result_with_parse_errors(
+        offenses: Vec<Offense>,
+        parse_errors: Vec<ParseError>,
+    ) -> TraversalResult {
+        TraversalResult {
+            results: vec![AnalysisResult {
+                path: "test.rb".to_string(),
+                offenses,
+            }],
+            parse_errors,
+            files_inspected: 1,
+        }
+    }
+
+    fn parse_error() -> ParseError {
+        ParseError {
+            path: "broken.rb".to_string(),
+            message: "boom".to_string(),
+        }
+    }
+
+    #[test]
+    fn format_by_file_lists_path_line_and_fixable_tag() {
+        let result = make_result(vec![
+            Offense::new(OffenseKind::SortVsSortBy, 7),
+            Offense::with_fix(OffenseKind::ForLoopVsEach, 9, Fix::single(0, 3, "x")),
+        ]);
+        let out = format_results_by_file(&result);
+        assert!(out.contains("test.rb"));
+        assert!(out.contains("L7"));
+        assert!(out.contains("L9"));
+        assert!(out.contains(OffenseKind::SortVsSortBy.explanation()));
+        assert!(out.contains("(fixable)"));
+    }
+
+    #[test]
+    fn format_by_rule_groups_and_counts() {
+        let result = make_result(vec![
+            Offense::new(OffenseKind::SortVsSortBy, 1),
+            Offense::new(OffenseKind::SortVsSortBy, 4),
+        ]);
+        let out = format_results_by_rule(&result);
+        assert!(out.contains("(2 offenses)"));
+        assert!(out.contains("test.rb:1"));
+        assert!(out.contains("test.rb:4"));
+    }
+
+    #[test]
+    fn format_plain_is_one_line_per_offense() {
+        let result = make_result(vec![
+            Offense::new(OffenseKind::SortVsSortBy, 1),
+            Offense::new(OffenseKind::GsubVsTr, 2),
+        ]);
+        let out = format_results_plain(&result);
+        assert!(out.contains("test.rb:1"));
+        assert!(out.contains("test.rb:2"));
+        // A file with no offenses contributes nothing.
+        assert!(format_results_plain(&make_result(vec![])).is_empty());
+    }
+
+    #[test]
+    fn format_parse_errors_lists_each_file() {
+        let out = format_parse_errors(&[parse_error()]);
+        assert!(out.contains("unable to process some files"));
+        assert!(out.contains("broken.rb - boom"));
+    }
+
+    #[test]
+    fn parse_error_banner_only_when_there_are_parse_errors() {
+        let clean = format_results(&make_result(vec![]), &OutputFormat::File);
+        assert!(!clean.contains("unable to process some files"));
+
+        let broken = format_results(
+            &make_result_with_parse_errors(vec![], vec![parse_error()]),
+            &OutputFormat::File,
+        );
+        assert!(broken.contains("unable to process some files"));
+    }
+
+    #[test]
+    fn parse_error_banner_in_fix_mode_only_when_there_are_parse_errors() {
+        let clean = format_fix_results(&make_result(vec![]), 0, 0, &OutputFormat::File);
+        assert!(!clean.contains("unable to process some files"));
+
+        let broken = format_fix_results(
+            &make_result_with_parse_errors(vec![], vec![parse_error()]),
+            0,
+            0,
+            &OutputFormat::File,
+        );
+        assert!(broken.contains("unable to process some files"));
+    }
+
+    #[test]
+    fn statistics_counts_files_offenses_and_fixables() {
+        let out = format_statistics(&make_result(vec![
+            Offense::new(OffenseKind::SortVsSortBy, 1),
+            Offense::with_fix(OffenseKind::ForLoopVsEach, 2, Fix::single(0, 3, "x")),
+        ]));
+        assert!(out.contains("1 file inspected"));
+        assert!(out.contains("2 offenses detected"));
+        assert!(out.contains("1 offense autocorrectable"));
+    }
+
+    #[test]
+    fn statistics_omits_autocorrectable_hint_when_none_are_fixable() {
+        let out = format_statistics(&make_result(vec![Offense::new(
+            OffenseKind::SortVsSortBy,
+            1,
+        )]));
+        assert!(!out.contains("autocorrectable"));
+    }
+
+    #[test]
+    fn statistics_reports_unparsable_files_only_when_present() {
+        let none = format_statistics(&make_result(vec![]));
+        assert!(!none.contains("unparsable"));
+
+        let some = format_statistics(&make_result_with_parse_errors(vec![], vec![parse_error()]));
+        assert!(some.contains("1 unparsable file found"));
+    }
+
+    #[test]
+    fn fix_statistics_reports_fixed_and_unfixable_counts() {
+        let result = make_result(vec![
+            Offense::new(OffenseKind::SortVsSortBy, 1),
+            Offense::with_fix(OffenseKind::ForLoopVsEach, 2, Fix::single(0, 3, "x")),
+        ]);
+        let out = format_fix_statistics(&result, 1, 0);
+        assert!(out.contains("1 offense fixed"));
+        assert!(out.contains("1 offense cannot be auto-fixed"));
+        assert!(!out.contains("skipped"));
+    }
+
+    #[test]
+    fn fix_statistics_reports_skipped_files_when_writes_failed() {
+        let result = make_result(vec![Offense::with_fix(
+            OffenseKind::ForLoopVsEach,
+            1,
+            Fix::single(0, 3, "x"),
+        )]);
+        let out = format_fix_statistics(&result, 0, 2);
+        assert!(out.contains("2 files skipped (syntax error after fix)"));
+    }
+
+    #[test]
+    fn fix_statistics_without_errors_or_leftovers() {
+        let result = make_result(vec![Offense::with_fix(
+            OffenseKind::ForLoopVsEach,
+            1,
+            Fix::single(0, 3, "x"),
+        )]);
+        let out = format_fix_statistics(&result, 1, 0);
+        assert!(out.contains("1 offense fixed"));
+        assert!(!out.contains("cannot be auto-fixed"));
+        assert!(!out.contains("skipped"));
+    }
+
+    /// Restores the global colour setting even if the test panics.
+    struct ForcedColour;
+
+    impl ForcedColour {
+        fn on() -> Self {
+            colored::control::set_override(true);
+            Self
+        }
+    }
+
+    impl Drop for ForcedColour {
+        fn drop(&mut self) {
+            colored::control::unset_override();
+        }
+    }
+
+    /// Colour is the only difference between some branches, so assert on the codes.
+    #[test]
+    fn zero_offenses_and_fixes_are_coloured_differently_from_non_zero() {
+        let _colour = ForcedColour::on();
+        let green = "\u{1b}[32m";
+
+        let clean = format_statistics(&make_result(vec![]));
+        assert!(clean.contains(&format!("{}0 offenses detected", green)));
+
+        let dirty = format_statistics(&make_result(vec![Offense::new(
+            OffenseKind::SortVsSortBy,
+            1,
+        )]));
+        assert!(!dirty.contains(&format!("{}1 offense detected", green)));
+
+        let result = make_result(vec![Offense::with_fix(
+            OffenseKind::ForLoopVsEach,
+            1,
+            Fix::single(0, 3, "x"),
+        )]);
+        assert!(
+            format_fix_statistics(&result, 1, 0).contains(&format!("{}1 offense fixed", green))
+        );
+        assert!(
+            !format_fix_statistics(&result, 0, 0).contains(&format!("{}0 offenses fixed", green))
+        );
+
+        colored::control::unset_override();
+    }
+
     #[test]
     fn filter_unfixable_keeps_only_no_fix() {
         let offenses = vec![
@@ -373,120 +611,11 @@ mod tests {
     }
 
     #[test]
-    fn print_results_by_file_no_panic() {
-        let result = make_result(vec![Offense::new(OffenseKind::GsubVsTr, 5)]);
-        print_results_by_file(&result);
-    }
-
-    #[test]
-    fn print_results_by_file_empty_no_panic() {
-        let result = make_result(vec![]);
-        print_results_by_file(&result);
-    }
-
-    #[test]
-    fn print_results_by_rule_no_panic() {
-        let result = make_result(vec![
-            Offense::new(OffenseKind::GsubVsTr, 5),
-            Offense::new(OffenseKind::GsubVsTr, 10),
-        ]);
-        print_results_by_rule(&result);
-    }
-
-    #[test]
-    fn print_results_plain_no_panic() {
-        let result = make_result(vec![Offense::new(OffenseKind::GsubVsTr, 5)]);
-        print_results_plain(&result);
-    }
-
-    #[test]
-    fn print_results_plain_empty_no_panic() {
-        let result = make_result(vec![]);
-        print_results_plain(&result);
-    }
-
-    #[test]
-    fn print_statistics_no_offenses() {
-        let result = make_result(vec![]);
-        print_statistics(&result);
-    }
-
-    #[test]
-    fn print_statistics_with_offenses() {
-        let result = make_result(vec![Offense::new(OffenseKind::GsubVsTr, 5)]);
-        print_statistics(&result);
-    }
-
-    #[test]
-    fn print_statistics_with_parse_errors() {
-        let result = TraversalResult {
-            results: vec![],
-            parse_errors: vec![ParseError {
-                path: "bad.rb".to_string(),
-                message: "syntax error".to_string(),
-            }],
-            files_inspected: 1,
-        };
-        print_statistics(&result);
-    }
-
-    #[test]
-    fn print_parse_errors_no_panic() {
-        let errors = vec![ParseError {
-            path: "bad.rb".to_string(),
-            message: "oops".to_string(),
-        }];
-        print_parse_errors(&errors);
-    }
-
-    #[test]
     fn print_results_dispatches_all_formats() {
         let result = make_result(vec![Offense::new(OffenseKind::GsubVsTr, 1)]);
         print_results(&result, &OutputFormat::File);
         print_results(&result, &OutputFormat::Rule);
         print_results(&result, &OutputFormat::Plain);
-    }
-
-    #[test]
-    fn print_fix_results_no_panic() {
-        let offenses = vec![
-            Offense::new(OffenseKind::GsubVsTr, 1),
-            Offense::with_fix(OffenseKind::ForLoopVsEach, 2, Fix::single(0, 3, "x")),
-        ];
-        let result = make_result(offenses);
-        print_fix_results(&result, 1, 0, &OutputFormat::File);
-    }
-
-    #[test]
-    fn print_fix_results_with_errors() {
-        let offenses = vec![Offense::with_fix(
-            OffenseKind::ForLoopVsEach,
-            1,
-            Fix::single(0, 3, "x"),
-        )];
-        let result = make_result(offenses);
-        print_fix_results(&result, 0, 1, &OutputFormat::File);
-    }
-
-    #[test]
-    fn print_fix_results_all_fixed() {
-        let offenses = vec![Offense::with_fix(
-            OffenseKind::ForLoopVsEach,
-            1,
-            Fix::single(0, 3, "x"),
-        )];
-        let result = make_result(offenses);
-        print_fix_results(&result, 1, 0, &OutputFormat::File);
-    }
-
-    #[test]
-    fn print_statistics_with_fixable_offenses() {
-        let offenses = vec![
-            Offense::with_fix(OffenseKind::ForLoopVsEach, 1, Fix::single(0, 3, "x")),
-            Offense::with_fix(OffenseKind::GsubVsTr, 2, Fix::single(0, 3, "y")),
-        ];
-        let result = make_result(offenses);
-        print_statistics(&result);
     }
 
     #[test]
@@ -523,17 +652,6 @@ mod tests {
             files_inspected: 2,
         };
         print_fix_results(&result, 1, 0, &OutputFormat::File);
-    }
-
-    #[test]
-    fn print_results_by_file_with_fixable_offense() {
-        let offenses = vec![Offense::with_fix(
-            OffenseKind::ForLoopVsEach,
-            1,
-            Fix::single(0, 3, "x"),
-        )];
-        let result = make_result(offenses);
-        print_results_by_file(&result);
     }
 
     #[test]

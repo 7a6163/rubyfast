@@ -1,9 +1,8 @@
 use std::process::Command;
 
 fn cargo_bin() -> Command {
-    let mut cmd = Command::new("cargo");
-    cmd.args(["run", "--quiet", "--"]);
-    cmd
+    // The built binary directly (not `cargo run`) so coverage instrumentation applies.
+    Command::new(env!("CARGO_BIN_EXE_rubyfast"))
 }
 
 #[test]
@@ -166,5 +165,54 @@ fn config_disables_rule() {
         output.status.success(),
         "Expected exit 0 when rule is disabled. stdout: {}",
         String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
+fn invalid_config_exits_with_error() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join(".rubyfast.yml"),
+        "speedups: [not, a, map]\n",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("a.rb"), "x = 1\n").unwrap();
+    let output = cargo_bin()
+        .arg(dir.path().to_str().unwrap())
+        .output()
+        .expect("Failed to run");
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Error loading config"),
+        "Expected config error, got: {}",
+        stderr
+    );
+}
+
+#[test]
+fn fix_mode_reports_unwritable_file() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let file = dir.path().join("readonly.rb");
+    std::fs::write(&file, "for x in [1,2,3]; puts x; end\n").unwrap();
+    let mut perms = std::fs::metadata(&file).unwrap().permissions();
+    perms.set_readonly(true);
+    std::fs::set_permissions(&file, perms).unwrap();
+
+    // Root (and some filesystems) ignore the read-only bit, so there would be
+    // nothing to assert — skip rather than fail.
+    if std::fs::write(&file, "unwritable?").is_ok() {
+        return;
+    }
+
+    let output = cargo_bin()
+        .args([file.to_str().unwrap(), "--fix"])
+        .output()
+        .expect("Failed to run");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Failed to write"),
+        "Expected write failure, got: {}",
+        stderr
     );
 }

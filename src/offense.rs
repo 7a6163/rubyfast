@@ -169,9 +169,50 @@ impl Offense {
     }
 }
 
+/// Test helper: does `offenses` contain an offense of `kind`?
+#[cfg(test)]
+pub fn has_kind(offenses: &[Offense], kind: OffenseKind) -> bool {
+    offenses.iter().any(|o| o.kind == kind)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explanations_are_distinct_and_specific() {
+        assert_eq!(
+            OffenseKind::ForLoopVsEach.explanation(),
+            "For loop is slower than using each"
+        );
+        let mut seen: Vec<&str> = OffenseKind::all().iter().map(|k| k.explanation()).collect();
+        seen.sort_unstable();
+        let count = seen.len();
+        seen.dedup();
+        assert_eq!(seen.len(), count);
+    }
+
+    #[test]
+    fn exactly_eight_kinds_are_fixable() {
+        let fixable: Vec<OffenseKind> = OffenseKind::all()
+            .iter()
+            .copied()
+            .filter(|k| k.is_fixable())
+            .collect();
+        assert_eq!(
+            fixable,
+            vec![
+                OffenseKind::ShuffleFirstVsSample,
+                OffenseKind::SelectFirstVsDetect,
+                OffenseKind::ReverseEachVsReverseEach,
+                OffenseKind::KeysEachVsEachKey,
+                OffenseKind::MapFlattenVsFlatMap,
+                OffenseKind::GsubVsTr,
+                OffenseKind::IncludeVsCoverOnRange,
+                OffenseKind::ForLoopVsEach,
+            ]
+        );
+    }
 
     #[test]
     fn all_returns_19_variants() {

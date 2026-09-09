@@ -235,10 +235,72 @@ mod tests {
     use super::*;
 
     fn parse_and_build(source: &str) -> DisabledSet {
-        let bytes = source.as_bytes();
+        parse_and_build_bytes(source.as_bytes())
+    }
+
+    fn parse_and_build_bytes(bytes: &[u8]) -> DisabledSet {
         let result = ruby_prism::parse(bytes);
         let newline_positions = crate::ast_helpers::compute_newline_positions(bytes);
         build_disabled_set(&result, bytes, &newline_positions)
+    }
+
+    #[test]
+    fn block_disable_starts_after_the_directive_line() {
+        // Line 1 is the directive itself; the block covers lines 2..3.
+        let set = parse_and_build(
+            "# rubyfast:disable shuffle_first_vs_sample\nx = 1\ny = 2\n# rubyfast:enable shuffle_first_vs_sample\nz = 3\n",
+        );
+        assert!(!set.is_disabled(1, OffenseKind::ShuffleFirstVsSample));
+        assert!(set.is_disabled(2, OffenseKind::ShuffleFirstVsSample));
+        assert!(set.is_disabled(3, OffenseKind::ShuffleFirstVsSample));
+        assert!(!set.is_disabled(4, OffenseKind::ShuffleFirstVsSample));
+    }
+
+    #[test]
+    fn block_disable_all_starts_after_the_directive_line() {
+        let set = parse_and_build("# rubyfast:disable all\nx = 1\n# rubyfast:enable all\ny = 2\n");
+        assert!(!set.is_disabled(1, OffenseKind::ShuffleFirstVsSample));
+        assert!(set.is_disabled(2, OffenseKind::ShuffleFirstVsSample));
+        assert!(!set.is_disabled(3, OffenseKind::ShuffleFirstVsSample));
+    }
+
+    #[test]
+    fn unclosed_block_disable_covers_the_final_line() {
+        // No trailing newline — the last line only exists via `newlines + 1`.
+        let set = parse_and_build("# rubyfast:disable shuffle_first_vs_sample\nx = 1\ny = 2");
+        assert!(set.is_disabled(3, OffenseKind::ShuffleFirstVsSample));
+    }
+
+    #[test]
+    fn unclosed_block_disable_all_covers_the_final_line() {
+        let set = parse_and_build("# rubyfast:disable all\nx = 1\ny = 2");
+        assert!(set.is_disabled(3, OffenseKind::ShuffleFirstVsSample));
+    }
+
+    #[test]
+    fn indented_directive_is_not_a_trailing_comment() {
+        // Only whitespace precedes the comment, so it opens a block rather than
+        // disabling just its own line.
+        let set = parse_and_build(
+            "  # rubyfast:disable shuffle_first_vs_sample\n  x = 1\n  # rubyfast:enable shuffle_first_vs_sample\n",
+        );
+        assert!(set.is_disabled(2, OffenseKind::ShuffleFirstVsSample));
+    }
+
+    #[test]
+    fn non_utf8_comment_is_skipped() {
+        let set = parse_and_build_bytes(
+            b"# \xff\xfe not utf-8\nx = [].shuffle.first # rubyfast:disable shuffle_first_vs_sample\n",
+        );
+        assert!(set.is_disabled(2, OffenseKind::ShuffleFirstVsSample));
+    }
+
+    #[test]
+    fn enable_without_matching_disable_is_ignored() {
+        let set = parse_and_build(
+            "x = [].shuffle.first\n# rubyfast:enable shuffle_first_vs_sample\n# rubyfast:enable all\n",
+        );
+        assert!(!set.is_disabled(1, OffenseKind::ShuffleFirstVsSample));
     }
 
     #[test]

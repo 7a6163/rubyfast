@@ -83,6 +83,14 @@ mod tests {
     }
 
     #[test]
+    fn no_fix_when_collection_is_on_the_next_line() {
+        // The delimiter is the newline right after `in`, so the collection text is empty.
+        let source = b"for x in  \n  arr\n  puts x\nend";
+        let f = parse_first_for(source);
+        assert!(build_fix(&f, source).is_none());
+    }
+
+    #[test]
     fn fix_for_loop_with_do() {
         let source = b"for x in arr do\n  puts x\nend";
         let f = parse_first_for(source);
@@ -100,8 +108,10 @@ mod tests {
         let f = parse_first_for(source);
         let fix = build_fix(&f, source).unwrap();
         let (fixed, _) = crate::fix::apply_fixes(source, &[fix]);
-        let fixed_str = String::from_utf8(fixed).unwrap();
-        assert!(fixed_str.starts_with("[1,2,3].each do |x|"));
+        assert_eq!(
+            String::from_utf8(fixed).unwrap(),
+            "[1,2,3].each do |x| puts x; end"
+        );
     }
 
     #[test]

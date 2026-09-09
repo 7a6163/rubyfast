@@ -11,6 +11,20 @@ Rust rewrite of [fasterer](https://github.com/DamirSvrtan/fasterer) — same det
 
 ## Installation
 
+### Homebrew
+
+```bash
+brew install 7a6163/tap/rubyfast
+```
+
+### Cargo
+
+```bash
+cargo install rubyfast
+```
+
+### From source
+
 ```bash
 cargo install --path .
 ```
@@ -110,7 +124,7 @@ Fixes are applied in reverse byte order with syntax verification — if a fix wo
 | 6 | `.map{}.flatten(1)` | `.flat_map{}` | Yes |
 | 7 | `.gsub("x","y")` (single chars) | `.tr("x","y")` | Yes |
 | 8 | `.sort { \|a,b\| ... }` | `.sort_by` | No |
-| 9 | `.fetch(k, v)` | `.fetch(k) { v }` | No |
+| 9 | `.fetch(k, v)` — constructed default | `.fetch(k) { v }` | No |
 | 10 | `.merge!({k: v})` | `h[k] = v` | No |
 | 11 | `.map { \|x\| x.foo }` | `.map(&:foo)` | No |
 | 12 | `.each_with_index` | `while` loop | No |
@@ -121,6 +135,12 @@ Fixes are applied in reverse byte order with syntax verification — if a fix wo
 | 17 | `def x; @x; end` | `attr_reader` | No |
 | 18 | `def x=(v); @x=v; end` | `attr_writer` | No |
 | 19 | `for x in arr` | `arr.each` | Yes |
+
+Rule 9 only fires when the default has to be constructed (`fetch(k, [])`,
+`fetch(k, "s")`, `fetch(k, Time.now)`). A cheap default — `nil`, a number, a symbol,
+`true`/`false`, a constant, or a variable read — is left alone, because the block's
+invocation cost makes the block form the slower one there. This matches the caveat fast-ruby
+documents next to the benchmark this rule comes from.
 
 ## Inline Disable
 
@@ -232,6 +252,8 @@ Compared against [fasterer](https://github.com/DamirSvrtan/fasterer) (v0.11.0, R
 cargo build
 cargo test
 cargo clippy -- -D warnings
+cargo llvm-cov              # line coverage (100%)
+cargo mutants               # mutation testing
 ```
 
 ## License

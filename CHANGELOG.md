@@ -1,5 +1,27 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- `fetch_with_argument_vs_block` no longer fires when the default costs nothing to
+  construct (`nil`, numbers, symbols, `true`/`false`, constants, variable reads) — the block form is
+  slower there, as fast-ruby documents next to the benchmark the rule comes from
+
+### Added
+
+- Homebrew install instructions (`brew install 7a6163/tap/rubyfast`)
+- Mutation testing with `cargo-mutants` (`.cargo/mutants.toml`, CI job on PR diffs)
+
+### Changed
+
+- 100% line coverage: CLI tests now run the built binary directly instead of `cargo run`
+- `output.rs` printers now build strings (`format_*`) that the `print_*` entry points
+  emit, so the reported counts and wording are actually asserted in tests
+- Drop the redundant `ProgramNode` arm in `walk_node` (the fallback already handles it)
+- Collapse duplicated `Option<StatementsNode>` / `Option<Node>` traversal in
+  `ast_visitor` and `analyzer` into shared `visit_*` / `walk_*` helpers
+
 ## [1.3.2] - 2026-03-16
 
 ### Fixed

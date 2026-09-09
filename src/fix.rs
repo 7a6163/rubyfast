@@ -58,7 +58,7 @@ pub fn apply_fixes(source: &[u8], fixes: &[Fix]) -> (Vec<u8>, usize) {
     // Flatten all replacements and sort by start descending
     let mut replacements: Vec<&Replacement> = fixes.iter().flat_map(|f| &f.replacements).collect();
 
-    replacements.sort_by(|a, b| b.start.cmp(&a.start));
+    replacements.sort_by_key(|r| std::cmp::Reverse(r.start));
 
     let mut result = source.to_vec();
     let mut last_start = usize::MAX;
@@ -118,6 +118,49 @@ mod tests {
         let (result, count) = apply_fixes(source, &[fix]);
         assert_eq!(result, b"hello rust");
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn adjacent_replacements_both_apply() {
+        // r1.end == r2.start — touching, not overlapping.
+        let source = b"abcdef";
+        let (result, count) =
+            apply_fixes(source, &[Fix::single(0, 3, "X"), Fix::single(3, 6, "Y")]);
+        assert_eq!(result, b"XY");
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn overlapping_replacements_skip_the_later_one() {
+        let source = b"abcdef";
+        let (result, count) =
+            apply_fixes(source, &[Fix::single(0, 4, "X"), Fix::single(2, 6, "Y")]);
+        assert_eq!(result, b"abY");
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn replacement_at_end_of_source_applies() {
+        let source = b"abc";
+        let (result, count) = apply_fixes(source, &[Fix::single(3, 3, "!")]);
+        assert_eq!(result, b"abc!");
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn out_of_bounds_replacement_is_skipped() {
+        let source = b"abc";
+        let (result, count) = apply_fixes(source, &[Fix::single(4, 9, "!")]);
+        assert_eq!(result, b"abc");
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn replacement_starting_in_bounds_but_ending_past_the_end_is_skipped() {
+        let source = b"abc";
+        let (result, count) = apply_fixes(source, &[Fix::single(2, 9, "!")]);
+        assert_eq!(result, b"abc");
+        assert_eq!(count, 0);
     }
 
     #[test]
