@@ -16,6 +16,8 @@
 ### Added
 
 - Homebrew install instructions (`brew install 7a6163/tap/rubyfast`)
+- Benchmark re-run against a named, reproducible corpus (rubygems.org @ `3c8ea0d4c`,
+  1,338 files) instead of an unspecified 2,235-file tree
 - Mutation testing with `cargo-mutants` (`.cargo/mutants.toml`, CI job on PR diffs)
 
 ### Changed
