@@ -1,0 +1,9 @@
+# main.rs is a thin CLI shim around process::exit — not unit-testable.
+exclude_globs = ["src/main.rs"]
+timeout_multiplier = 3.0
+minimum_test_timeout = 30
+
+# Equivalent mutant: `line_start = p + 1` vs `p * 1` only shifts the slice to include
+# the preceding newline, which is whitespace — the `any(!is_whitespace)` result is
+# identical either way, so no test can distinguish them.
+exclude_re = ["replace \\+ with \\* in is_trailing_comment"]

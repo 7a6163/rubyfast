@@ -45,10 +45,10 @@ mod tests {
 
     fn collect_rescue_offenses<'pr>(node: &Node<'pr>, offenses: &mut Vec<Offense>) {
         // For BeginNode, we need to access the rescue clause specially
-        if let Some(begin) = node.as_begin_node() {
-            if let Some(rescue) = begin.rescue_clause() {
-                collect_from_rescue_chain(&rescue, offenses);
-            }
+        if let Some(begin) = node.as_begin_node()
+            && let Some(rescue) = begin.rescue_clause()
+        {
+            collect_from_rescue_chain(&rescue, offenses);
         }
         for_each_direct_child(node, &mut |child| {
             collect_rescue_offenses(child, offenses);
@@ -60,6 +60,13 @@ mod tests {
         if let Some(subsequent) = rescue.subsequent() {
             collect_from_rescue_chain(&subsequent, offenses);
         }
+    }
+
+    #[test]
+    fn rescue_chain_scans_subsequent_clauses() {
+        let offenses =
+            parse_and_find_rescue_bodies(b"begin; rescue ArgumentError; rescue NoMethodError; end");
+        assert_eq!(offenses.len(), 1);
     }
 
     #[test]

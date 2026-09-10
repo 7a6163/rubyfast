@@ -73,6 +73,13 @@ fn fetch_with_argument() {
 }
 
 #[test]
+fn fetch_with_frozen_string_literals() {
+    let kinds = analyze("09b_fetch_frozen_strings.rb");
+    // Only the interpolated string and the array literal have to be built.
+    assert_eq!(count_kind(&kinds, OffenseKind::FetchWithArgumentVsBlock), 2);
+}
+
+#[test]
 fn hash_merge_bang() {
     let kinds = analyze("10_hash_merge_bang.rb");
     assert!(count_kind(&kinds, OffenseKind::HashMergeBangVsHashBrackets) >= 2);

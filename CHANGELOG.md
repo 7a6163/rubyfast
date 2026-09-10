@@ -1,5 +1,37 @@
 # Changelog
 
+## [1.4.0] - 2026-09-10
+
+### Security
+
+- Bump `crossbeam-epoch` to 0.9.21 (RUSTSEC-2026-0204) and `anyhow` to 1.0.104
+  (RUSTSEC-2026-0190)
+
+### Fixed
+
+- `fetch_with_argument_vs_block` no longer fires when the default costs nothing to
+  construct — the block form is slower there, as fast-ruby documents next to the
+  benchmark the rule comes from. Cheap means `nil`, numbers, symbols, `true`/`false`,
+  constants, variable reads, and — in a file with `# frozen_string_literal: true` —
+  plain string literals, which are frozen and deduplicated. Interpolated strings and
+  collection literals still fire
+
+### Added
+
+- Homebrew install instructions (`brew install 7a6163/tap/rubyfast`)
+- Benchmark re-run against a named, reproducible corpus (rubygems.org @ `3c8ea0d4c`,
+  1,338 files) instead of an unspecified 2,235-file tree
+- Mutation testing with `cargo-mutants` (`.cargo/mutants.toml`, CI job on PR diffs)
+
+### Changed
+
+- 100% line coverage: CLI tests now run the built binary directly instead of `cargo run`
+- `output.rs` printers now build strings (`format_*`) that the `print_*` entry points
+  emit, so the reported counts and wording are actually asserted in tests
+- Drop the redundant `ProgramNode` arm in `walk_node` (the fallback already handles it)
+- Collapse duplicated `Option<StatementsNode>` / `Option<Node>` traversal in
+  `ast_visitor` and `analyzer` into shared `visit_*` / `walk_*` helpers
+
 ## [1.3.2] - 2026-03-16
 
 ### Fixed

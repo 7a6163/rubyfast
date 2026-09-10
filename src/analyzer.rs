@@ -54,7 +54,11 @@ pub fn analyze_file(path: &Path, config: &Config) -> Result<AnalysisResult, Pars
     let disabled_set = build_disabled_set(&result, &source, &newline_positions);
 
     let mut offenses = Vec::new();
-    walk_node(&root, &mut offenses, &source);
+    let ctx = FileContext {
+        source: &source,
+        frozen_string_literals: has_frozen_string_literals(&result),
+    };
+    walk_node(&root, &mut offenses, ctx);
 
     // Resolve byte offsets to line numbers, then filter by config and inline directives
     let offenses = offenses
@@ -77,60 +81,69 @@ pub fn analyze_file(path: &Path, config: &Config) -> Result<AnalysisResult, Pars
     })
 }
 
+/// Per-file facts the walk needs beyond the node itself.
+#[derive(Clone, Copy)]
+struct FileContext<'a> {
+    source: &'a [u8],
+    /// The file carries `# frozen_string_literal: true`.
+    frozen_string_literals: bool,
+}
+
+/// Whether the parsed file enables frozen string literals.
+fn has_frozen_string_literals(result: &ruby_prism::ParseResult<'_>) -> bool {
+    result
+        .magic_comments()
+        .any(|c| c.key() == b"frozen_string_literal" && c.value() == b"true")
+}
+
+/// Walk each statement of an optional StatementsNode.
+fn walk_stmts(
+    stmts: Option<ruby_prism::StatementsNode<'_>>,
+    offenses: &mut Vec<Offense>,
+    ctx: FileContext<'_>,
+) {
+    let Some(stmts) = stmts else { return };
+    for child in stmts.body().iter() {
+        walk_node(&child, offenses, ctx);
+    }
+}
+
+/// Walk an optional child node.
+fn walk_opt(node: Option<Node<'_>>, offenses: &mut Vec<Offense>, ctx: FileContext<'_>) {
+    if let Some(node) = node {
+        walk_node(&node, offenses, ctx);
+    }
+}
+
 /// Recursively walk the AST, dispatching to scanners.
-fn walk_node(node: &Node<'_>, offenses: &mut Vec<Offense>, source: &[u8]) {
+fn walk_node(node: &Node<'_>, offenses: &mut Vec<Offense>, ctx: FileContext<'_>) {
     match node {
-        Node::ProgramNode { .. } => {
-            let prog = node.as_program_node().unwrap();
-            for child in prog.statements().body().iter() {
-                walk_node(&child, offenses, source);
-            }
-        }
         Node::ForNode { .. } => {
             let f = node.as_for_node().unwrap();
-            offenses.extend(for_loop_scanner::scan(&f, source));
-            for_each_direct_child(node, &mut |child| walk_node(child, offenses, source));
+            offenses.extend(for_loop_scanner::scan(&f, ctx.source));
+            for_each_direct_child(node, &mut |child| walk_node(child, offenses, ctx));
         }
         Node::BeginNode { .. } => {
             let begin = node.as_begin_node().unwrap();
-            // Visit statements
-            if let Some(stmts) = begin.statements() {
-                for child in stmts.body().iter() {
-                    walk_node(&child, offenses, source);
-                }
-            }
-            // Visit rescue clauses
+            walk_stmts(begin.statements(), offenses, ctx);
             if let Some(rescue) = begin.rescue_clause() {
-                walk_rescue_node(&rescue, offenses, source);
+                walk_rescue_node(&rescue, offenses, ctx);
             }
-            // Visit else clause
-            if let Some(else_clause) = begin.else_clause()
-                && let Some(stmts) = else_clause.statements()
-            {
-                for child in stmts.body().iter() {
-                    walk_node(&child, offenses, source);
-                }
-            }
-            // Visit ensure clause
-            if let Some(ensure) = begin.ensure_clause()
-                && let Some(stmts) = ensure.statements()
-            {
-                for child in stmts.body().iter() {
-                    walk_node(&child, offenses, source);
-                }
-            }
-        }
-        Node::RescueNode { .. } => {
-            let rn = node.as_rescue_node().unwrap();
-            walk_rescue_node(&rn, offenses, source);
+            walk_stmts(
+                begin.else_clause().and_then(|c| c.statements()),
+                offenses,
+                ctx,
+            );
+            walk_stmts(
+                begin.ensure_clause().and_then(|c| c.statements()),
+                offenses,
+                ctx,
+            );
         }
         Node::DefNode { .. } => {
             let d = node.as_def_node().unwrap();
             offenses.extend(method_definition_scanner::scan(&d));
-            // Walk the body
-            if let Some(body) = d.body() {
-                walk_node(&body, offenses, source);
-            }
+            walk_opt(d.body(), offenses, ctx);
         }
         Node::CallNode { .. } => {
             let call = node.as_call_node().unwrap();
@@ -150,22 +163,21 @@ fn walk_node(node: &Node<'_>, offenses: &mut Vec<Offense>, source: &[u8]) {
                 Some(Node::BlockNode { .. }) => {
                     let block = call.block().unwrap().as_block_node().unwrap();
                     offenses.extend(method_call_scanner::scan_call_with_block(&call, &block));
-                    walk_call_children(&call, offenses, source);
-                    if let Some(body) = block.body() {
-                        walk_node(&body, offenses, source);
-                    }
+                    walk_call_children(&call, offenses, ctx);
+                    walk_opt(block.body(), offenses, ctx);
                 }
                 _ => {
-                    offenses.extend(method_call_scanner::scan_call(&call));
-                    walk_call_children(&call, offenses, source);
-                    if let Some(block) = call.block() {
-                        walk_node(&block, offenses, source);
-                    }
+                    offenses.extend(method_call_scanner::scan_call(
+                        &call,
+                        ctx.frozen_string_literals,
+                    ));
+                    walk_call_children(&call, offenses, ctx);
+                    walk_opt(call.block(), offenses, ctx);
                 }
             }
         }
         _ => {
-            for_each_direct_child(node, &mut |child| walk_node(child, offenses, source));
+            for_each_direct_child(node, &mut |child| walk_node(child, offenses, ctx));
         }
     }
 }
@@ -174,45 +186,61 @@ fn walk_node(node: &Node<'_>, offenses: &mut Vec<Offense>, source: &[u8]) {
 fn walk_rescue_node(
     rescue: &ruby_prism::RescueNode<'_>,
     offenses: &mut Vec<Offense>,
-    source: &[u8],
+    ctx: FileContext<'_>,
 ) {
     offenses.extend(rescue_scanner::scan(rescue));
 
     // Walk exception list
     for exc in rescue.exceptions().iter() {
-        walk_node(&exc, offenses, source);
+        walk_node(&exc, offenses, ctx);
     }
     // Walk reference
-    if let Some(reference) = rescue.reference() {
-        walk_node(&reference, offenses, source);
-    }
+    walk_opt(rescue.reference(), offenses, ctx);
     // Walk statements
-    if let Some(stmts) = rescue.statements() {
-        for child in stmts.body().iter() {
-            walk_node(&child, offenses, source);
-        }
-    }
+    walk_stmts(rescue.statements(), offenses, ctx);
     // Walk subsequent rescue clauses
     if let Some(subsequent) = rescue.subsequent() {
-        walk_rescue_node(&subsequent, offenses, source);
+        walk_rescue_node(&subsequent, offenses, ctx);
     }
 }
 
 /// Walk a CallNode's receiver and arguments (shared by block and non-block paths).
-fn walk_call_children(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offense>, source: &[u8]) {
+fn walk_call_children(
+    call: &ruby_prism::CallNode<'_>,
+    offenses: &mut Vec<Offense>,
+    ctx: FileContext<'_>,
+) {
     if let Some(recv) = call.receiver() {
-        walk_node(&recv, offenses, source);
+        walk_node(&recv, offenses, ctx);
     }
     if let Some(args) = call.arguments() {
         for arg in args.arguments().iter() {
-            walk_node(&arg, offenses, source);
+            walk_node(&arg, offenses, ctx);
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::has_frozen_string_literals;
     use crate::ast_helpers::{byte_offset_to_line, compute_newline_positions};
+
+    #[test]
+    fn detects_the_frozen_string_literal_magic_comment() {
+        let cases: &[(&[u8], bool)] = &[
+            (b"# frozen_string_literal: true\nx = 1", true),
+            (b"# frozen_string_literal: false\nx = 1", false),
+            (b"# encoding: utf-8\nx = 1", false),
+            (b"x = 1", false),
+        ];
+        for (source, expected) in cases {
+            let result = ruby_prism::parse(source);
+            assert_eq!(
+                (source, has_frozen_string_literals(&result)),
+                (source, *expected)
+            );
+        }
+    }
 
     #[test]
     fn byte_offset_to_line_works() {
