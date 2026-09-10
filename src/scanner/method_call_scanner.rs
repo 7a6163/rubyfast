@@ -3,7 +3,7 @@ use crate::fix::Fix;
 use crate::offense::{Offense, OffenseKind};
 
 /// Scan a method call (CallNode) that does NOT have a block.
-pub fn scan_call(call: &ruby_prism::CallNode<'_>) -> Vec<Offense> {
+pub fn scan_call(call: &ruby_prism::CallNode<'_>, frozen_string_literals: bool) -> Vec<Offense> {
     let mut offenses = Vec::new();
 
     check_shuffle_first(call, &mut offenses);
@@ -12,7 +12,7 @@ pub fn scan_call(call: &ruby_prism::CallNode<'_>) -> Vec<Offense> {
     check_each_with_index(call, &mut offenses);
     check_include_vs_cover(call, &mut offenses);
     check_gsub_vs_tr(call, &mut offenses);
-    check_fetch_with_argument(call, &mut offenses);
+    check_fetch_with_argument(call, frozen_string_literals, &mut offenses);
     check_hash_merge_bang(call, &mut offenses);
     check_map_flatten(call, &mut offenses);
     check_select_first(call, &mut offenses);
@@ -312,7 +312,11 @@ fn check_sort_vs_sort_by(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Off
 }
 
 /// `.fetch(k, v)` → `.fetch(k) { v }`
-fn check_fetch_with_argument(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offense>) {
+fn check_fetch_with_argument(
+    call: &ruby_prism::CallNode<'_>,
+    frozen_string_literals: bool,
+    offenses: &mut Vec<Offense>,
+) {
     if call.name().as_slice() != b"fetch" || arg_count(call) != 2 || has_block_pass(call) {
         return;
     }
@@ -320,7 +324,7 @@ fn check_fetch_with_argument(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec
     // default (nil, a number, a symbol, a constant) the block's invocation cost makes
     // it the slower option — fast-ruby documents this exemption next to the benchmark.
     if let Some((_, default)) = call_args_pair(call)
-        && is_cheap_value(&default)
+        && is_cheap_value(&default, frozen_string_literals)
     {
         return;
     }
@@ -427,14 +431,17 @@ mod tests {
 
     fn parse_and_collect(source: &[u8]) -> Vec<Offense> {
         let result = leak_parse(source);
+        let frozen = result
+            .magic_comments()
+            .any(|c| c.key() == b"frozen_string_literal" && c.value() == b"true");
         let mut offenses = Vec::new();
         let root = result.node();
-        walk_for_offenses(&root, &mut offenses);
+        walk_for_offenses(&root, frozen, &mut offenses);
         offenses
     }
 
     /// Walk AST matching real analyzer behavior.
-    fn walk_for_offenses<'pr>(node: &Node<'pr>, offenses: &mut Vec<Offense>) {
+    fn walk_for_offenses<'pr>(node: &Node<'pr>, frozen: bool, offenses: &mut Vec<Offense>) {
         match node {
             Node::CallNode { .. } => {
                 let call = node.as_call_node().unwrap();
@@ -453,29 +460,29 @@ mod tests {
                         offenses.extend(scan_call_with_block(&call, &block));
                         // Walk receiver and arguments
                         if let Some(recv) = call.receiver() {
-                            walk_for_offenses(&recv, offenses);
+                            walk_for_offenses(&recv, frozen, offenses);
                         }
                         if let Some(args) = call.arguments() {
                             for arg in args.arguments().iter() {
-                                walk_for_offenses(&arg, offenses);
+                                walk_for_offenses(&arg, frozen, offenses);
                             }
                         }
                         // Walk block body
                         if let Some(body) = block.body() {
-                            walk_for_offenses(&body, offenses);
+                            walk_for_offenses(&body, frozen, offenses);
                         }
                     }
                     _ => {
-                        offenses.extend(scan_call(&call));
+                        offenses.extend(scan_call(&call, frozen));
                         for_each_direct_child(node, &mut |child| {
-                            walk_for_offenses(child, offenses);
+                            walk_for_offenses(child, frozen, offenses);
                         });
                     }
                 }
             }
             _ => {
                 for_each_direct_child(node, &mut |child| {
-                    walk_for_offenses(child, offenses);
+                    walk_for_offenses(child, frozen, offenses);
                 });
             }
         }
@@ -554,6 +561,32 @@ mod tests {
                 "cheap default should not fire"
             );
         }
+    }
+
+    #[test]
+    fn fetch_string_default_fires_without_the_frozen_magic_comment() {
+        let o = parse_and_collect(b"h.fetch(:k, \"fallback\")");
+        assert!(has_kind(&o, OffenseKind::FetchWithArgumentVsBlock));
+    }
+
+    #[test]
+    fn fetch_string_default_no_fire_under_frozen_string_literal() {
+        // A plain literal is a frozen, deduplicated value here — nothing to build.
+        let o = parse_and_collect(b"# frozen_string_literal: true\nENV.fetch(\"PORT\", \"3000\")");
+        assert!(!has_kind(&o, OffenseKind::FetchWithArgumentVsBlock));
+    }
+
+    #[test]
+    fn fetch_interpolated_default_still_fires_under_frozen_string_literal() {
+        // Interpolation builds a new string on every call, magic comment or not.
+        let o = parse_and_collect(b"# frozen_string_literal: true\nh.fetch(:k, \"sum+#{name}\")");
+        assert!(has_kind(&o, OffenseKind::FetchWithArgumentVsBlock));
+    }
+
+    #[test]
+    fn fetch_collection_default_still_fires_under_frozen_string_literal() {
+        let o = parse_and_collect(b"# frozen_string_literal: true\nh.fetch(:k, [])");
+        assert!(has_kind(&o, OffenseKind::FetchWithArgumentVsBlock));
     }
 
     #[test]

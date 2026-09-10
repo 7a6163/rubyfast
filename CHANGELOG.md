@@ -10,8 +10,11 @@
 ### Fixed
 
 - `fetch_with_argument_vs_block` no longer fires when the default costs nothing to
-  construct (`nil`, numbers, symbols, `true`/`false`, constants, variable reads) — the block form is
-  slower there, as fast-ruby documents next to the benchmark the rule comes from
+  construct — the block form is slower there, as fast-ruby documents next to the
+  benchmark the rule comes from. Cheap means `nil`, numbers, symbols, `true`/`false`,
+  constants, variable reads, and — in a file with `# frozen_string_literal: true` —
+  plain string literals, which are frozen and deduplicated. Interpolated strings and
+  collection literals still fire
 
 ### Added
 

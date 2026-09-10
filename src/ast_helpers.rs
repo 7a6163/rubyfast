@@ -110,12 +110,20 @@ pub fn is_primitive(node: &Node<'_>) -> bool {
 }
 
 /// Check if a node costs nothing to construct — literals that are already values
-/// (immediates, interned symbols) and constant reads.
+/// (immediates, interned symbols), constant reads and variable reads.
 ///
 /// Used by the `fetch` rule: fast-ruby documents, right next to the benchmark the
 /// rule comes from, that the block form only wins when the default has to be built.
 /// With a cheap default the argument form is the faster one.
-pub fn is_cheap_value(node: &Node<'_>) -> bool {
+///
+/// `frozen_string_literals` reflects the file's `# frozen_string_literal: true`
+/// magic comment. Under it a plain string literal is a frozen, deduplicated value
+/// that allocates nothing; interpolated strings still build a new string every time
+/// and are a separate node type, so they stay expensive either way.
+pub fn is_cheap_value(node: &Node<'_>, frozen_string_literals: bool) -> bool {
+    if frozen_string_literals && matches!(node, Node::StringNode { .. }) {
+        return true;
+    }
     matches!(
         node,
         Node::TrueNode { .. }

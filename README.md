@@ -240,16 +240,18 @@ Corpus: [rubygems.org](https://github.com/rubygems/rubygems.org) at `3c8ea0d4c` 
 
 | Tool | Parser | Time | Relative |
 |:---|:---|---:|---:|
-| **rubyfast v1.4.0** | Rust + ruby-prism | **61.8 ms** | **1x** |
-| fasterer (prism fork) | Ruby + prism | 579 ms | 9.4x slower |
-| fasterer v0.11.0 | Ruby + ruby_parser | 4.65 s | 75x slower |
+| **rubyfast v1.4.0** | Rust + ruby-prism | **64.7 ms** | **1x** |
+| fasterer (prism fork) | Ruby + prism | 546 ms | 8.4x slower |
+| fasterer v0.11.0 | Ruby + ruby_parser | 4.38 s | 68x slower |
 
-**rubyfast is 75x faster** than the original fasterer and **9.4x faster** than the prism-based Ruby fork.
+**rubyfast is 68x faster** than the original fasterer and **8.4x faster** than the prism-based Ruby fork.
 
-On this corpus rubyfast reports 61 offenses to fasterer's 74. Every rule matches
-exactly except `fetch`, where the 13-offense gap is entirely cheap defaults
-(`fetch(:k, nil)`, `fetch("PORT", 3000)`, `fetch(:x, false)`) that fasterer
-reports and rubyfast deliberately does not — see rule 9 above.
+On this corpus rubyfast reports 33 offenses to fasterer's 74. Every rule matches
+exactly except `fetch` (15 vs 56); all 41 of the difference are cheap defaults
+(`fetch(:k, nil)`, `fetch("PORT", 3000)`, `fetch(:otp, "")` in a frozen-string-literal
+file) that fasterer reports and rubyfast deliberately does not — see rule 9 above.
+The 15 that remain all build something: `[]`, `{}`, a method call, or an interpolated
+string.
 
 ## Development
 
