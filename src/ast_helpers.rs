@@ -76,18 +76,13 @@ pub fn is_single_char_string(node: &Node<'_>) -> bool {
 
 /// Check if the receiver is a range (RangeNode, inclusive or exclusive).
 /// Also handles parenthesized ranges: `(1..10)` parses as `ParenthesesNode(RangeNode)`.
-pub fn receiver_is_range(recv: &Option<Node<'_>>) -> bool {
-    let Some(node) = recv else { return false };
-    if node.as_range_node().is_some() {
-        return true;
+pub fn receiver_range<'pr>(recv: &Option<Node<'pr>>) -> Option<ruby_prism::RangeNode<'pr>> {
+    let node = recv.as_ref()?;
+    if let Some(range) = node.as_range_node() {
+        return Some(range);
     }
-    let Some(paren) = node.as_parentheses_node() else {
-        return false;
-    };
-    let Some(body) = paren.body() else {
-        return false;
-    };
-    body_single_expression(Some(body)).is_some_and(|expr| expr.as_range_node().is_some())
+    let body = node.as_parentheses_node()?.body()?;
+    body_single_expression(Some(body))?.as_range_node()
 }
 
 /// Check if a node is a literal/primitive (not a variable reference or method call).
@@ -392,21 +387,21 @@ mod tests {
     fn receiver_is_range_inclusive() {
         let node = parse_first_stmt(b"(1..10).include?(5)");
         let call = node.as_call_node().unwrap();
-        assert!(receiver_is_range(&call.receiver()));
+        assert!(receiver_range(&call.receiver()).is_some());
     }
 
     #[test]
     fn receiver_is_range_exclusive() {
         let node = parse_first_stmt(b"(1...10).include?(5)");
         let call = node.as_call_node().unwrap();
-        assert!(receiver_is_range(&call.receiver()));
+        assert!(receiver_range(&call.receiver()).is_some());
     }
 
     #[test]
     fn receiver_is_range_not_range() {
         let node = parse_first_stmt(b"[1].include?(5)");
         let call = node.as_call_node().unwrap();
-        assert!(!receiver_is_range(&call.receiver()));
+        assert!(receiver_range(&call.receiver()).is_none());
     }
 
     #[test]
@@ -650,7 +645,7 @@ mod tests {
 
     #[test]
     fn receiver_is_range_none() {
-        assert!(!receiver_is_range(&None));
+        assert!(receiver_range(&None).is_none());
     }
 
     #[test]
@@ -701,17 +696,17 @@ mod tests {
 
     #[test]
     fn receiver_is_range_unparenthesized() {
-        assert!(receiver_is_range(&Some(parse_first_stmt(b"1..10"))));
+        assert!(receiver_range(&Some(parse_first_stmt(b"1..10"))).is_some());
     }
 
     #[test]
     fn receiver_is_range_non_range_non_paren() {
-        assert!(!receiver_is_range(&Some(parse_first_stmt(b"42"))));
+        assert!(receiver_range(&Some(parse_first_stmt(b"42"))).is_none());
     }
 
     #[test]
     fn receiver_is_range_empty_parentheses() {
-        assert!(!receiver_is_range(&Some(parse_first_stmt(b"()"))));
+        assert!(receiver_range(&Some(parse_first_stmt(b"()"))).is_none());
     }
 
     #[test]

@@ -215,4 +215,66 @@ fn fix_mode_reports_unwritable_file() {
         "Expected write failure, got: {}",
         stderr
     );
+    // The offense is still in the file, so it must be reported and fail the run.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(1), "stdout: {}", stdout);
+    assert!(stdout.contains("0 offenses fixed"), "stdout: {}", stdout);
+    assert!(stdout.contains("For loop"), "stdout: {}", stdout);
+}
+
+fn run_fix(source: &str) -> (Option<i32>, String, String) {
+    let dir = tempfile::TempDir::new().unwrap();
+    let file = dir.path().join("t.rb");
+    std::fs::write(&file, source).unwrap();
+    let output = cargo_bin()
+        .args([file.to_str().unwrap(), "--fix", "--format", "plain"])
+        .output()
+        .expect("Failed to run");
+    (
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        std::fs::read_to_string(&file).unwrap(),
+    )
+}
+
+#[test]
+fn fix_mode_exits_0_when_every_fix_applies() {
+    let (code, stdout, content) = run_fix("for x in 1..3 do\n  puts x\nend\n");
+    assert_eq!(code, Some(0), "stdout: {}", stdout);
+    assert_eq!(content, "(1..3).each do |x|\n  puts x\nend\n");
+}
+
+#[test]
+fn fix_mode_counts_fixes_not_replacements() {
+    let (code, stdout, content) = run_fix("arr.select { |x| x }.first\n");
+    assert_eq!(code, Some(0), "stdout: {}", stdout);
+    assert_eq!(content, "arr.detect { |x| x }\n");
+    assert!(stdout.contains("1 offense fixed"), "stdout: {}", stdout);
+}
+
+#[test]
+fn fix_mode_exits_1_when_an_overlapping_fix_is_skipped() {
+    // The include? fix lies inside the for-loop header the for fix rewrites, so only the
+    // for fix lands; the include? offense remains and must fail the run.
+    let (code, stdout, content) = run_fix("for x in [(1..3).include?(2)]; puts x; end\n");
+    assert_eq!(code, Some(1), "stdout: {}", stdout);
+    assert_eq!(content, "[(1..3).include?(2)].each do |x| puts x; end\n");
+    assert!(stdout.contains("1 offense fixed"), "stdout: {}", stdout);
+    assert!(stdout.contains("cover?"), "stdout: {}", stdout);
+}
+
+#[test]
+fn fix_mode_keeps_for_loop_whose_locals_escape() {
+    let src = "for x in arr\n  last = x\nend\nputs last\n";
+    let (code, stdout, content) = run_fix(src);
+    assert_eq!(code, Some(1), "stdout: {}", stdout);
+    assert_eq!(content, src);
+}
+
+#[test]
+fn fix_mode_keeps_include_on_string_range() {
+    let src = "('a'..'z').include?('bb')\n";
+    let (code, stdout, content) = run_fix(src);
+    assert_eq!(code, Some(1), "stdout: {}", stdout);
+    assert_eq!(content, src);
 }

@@ -267,12 +267,26 @@ fn check_each_with_index(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Off
 }
 
 /// `(1..10).include?` → `.cover?`
+///
+/// Only numeric-literal ranges get a fix: on other ranges (e.g. `'a'..'z'`) `include?` tests
+/// membership while `cover?` compares bounds, so swapping them changes results.
 fn check_include_vs_cover(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offense>) {
-    if call.name().as_slice() != b"include?" || !receiver_is_range(&call.receiver()) {
+    if call.name().as_slice() != b"include?" {
         return;
     }
+    let Some(range) = receiver_range(&call.receiver()) else {
+        return;
+    };
+    let is_number = |n: &ruby_prism::Node<'_>| {
+        n.as_integer_node().is_some()
+            || n.as_float_node().is_some()
+            || n.as_rational_node().is_some()
+    };
+    let ends = [range.left(), range.right()];
+    let numeric = ends.iter().any(Option::is_some) && ends.iter().flatten().all(is_number);
     let fix = call
         .message_loc()
+        .filter(|_| numeric)
         .map(|sel_l| Fix::single(sel_l.start_offset(), sel_l.end_offset(), "cover?"));
     offenses.push(Offense::with_optional_fix(
         OffenseKind::IncludeVsCoverOnRange,
@@ -809,6 +823,31 @@ mod tests {
     fn include_on_exclusive_range() {
         let o = parse_and_collect(b"(1...10).include?(5)");
         assert!(has_kind(&o, OffenseKind::IncludeVsCoverOnRange));
+    }
+
+    fn include_fix(src: &[u8]) -> Option<bool> {
+        parse_and_collect(src)
+            .iter()
+            .find(|o| o.kind == OffenseKind::IncludeVsCoverOnRange)
+            .map(|o| o.fix.is_some())
+    }
+
+    #[test]
+    fn include_on_numeric_range_is_fixable() {
+        assert_eq!(include_fix(b"(1..10).include?(5)"), Some(true));
+        assert_eq!(include_fix(b"(1.0...2.5).include?(x)"), Some(true));
+        assert_eq!(include_fix(b"(-1..1r).include?(x)"), Some(true));
+        assert_eq!(include_fix(b"(1..).include?(x)"), Some(true));
+        assert_eq!(include_fix(b"(..10).include?(x)"), Some(true));
+    }
+
+    #[test]
+    fn include_on_non_numeric_range_fires_without_fix() {
+        // ('a'..'z').include?('bb') is false but cover?('bb') is true.
+        assert_eq!(include_fix(b"('a'..'z').include?('bb')"), Some(false));
+        assert_eq!(include_fix(b"(a..b).include?(x)"), Some(false));
+        assert_eq!(include_fix(b"(1..n).include?(x)"), Some(false));
+        assert_eq!(include_fix(b"(nil..nil).include?(x)"), Some(false));
     }
 
     #[test]

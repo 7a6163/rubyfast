@@ -35,30 +35,39 @@ fn main() {
         }
     };
 
-    let result = traverse_and_analyze(path, &config);
+    let mut result = traverse_and_analyze(path, &config);
 
     if cli.fix {
         let mut total_fixed = 0;
         let mut total_errors = 0;
 
-        for analysis in &result.results {
+        for analysis in &mut result.results {
             let fixes: Vec<_> = analysis
                 .offenses
                 .iter()
-                .filter_map(|o| o.fix.as_ref())
-                .cloned()
+                .filter_map(|o| o.fix.clone())
                 .collect();
 
             if fixes.is_empty() {
                 continue;
             }
 
-            let file_path = Path::new(&analysis.path);
-            match apply_fixes_to_file(file_path, &fixes) {
-                Ok(count) => total_fixed += count,
+            let applied = match apply_fixes_to_file(Path::new(&analysis.path), &fixes) {
+                Ok(applied) => applied,
                 Err(e) => {
                     eprintln!("{}", colored::Colorize::yellow(e.as_str()));
                     total_errors += 1;
+                    vec![false; fixes.len()]
+                }
+            };
+            total_fixed += applied.iter().filter(|&&a| a).count();
+
+            // Fixes that didn't land leave their offense in the source: drop the fix so the
+            // offense is reported and counted as remaining below.
+            let mut applied = applied.into_iter();
+            for o in analysis.offenses.iter_mut().filter(|o| o.fix.is_some()) {
+                if !applied.next().unwrap_or(false) {
+                    o.fix = None;
                 }
             }
         }
@@ -69,7 +78,7 @@ fn main() {
     }
 
     if cli.fix {
-        // In fix mode, only exit 1 if there are unfixable offenses remaining
+        // In fix mode, only exit 1 if offenses remain (unfixable, or whose fix didn't apply)
         let unfixable = result
             .results
             .iter()

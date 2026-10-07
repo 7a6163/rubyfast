@@ -128,19 +128,26 @@ Fixes are applied in reverse byte order with syntax verification — if a fix wo
 | 10 | `.merge!({k: v})` | `h[k] = v` | No |
 | 11 | `.map { \|x\| x.foo }` | `.map(&:foo)` | No |
 | 12 | `.each_with_index` | `while` loop | No |
-| 13 | `(1..10).include?` | `.cover?` | Yes |
+| 13 | `(1..10).include?` | `.cover?` | Numeric ranges |
 | 14 | `.module_eval("def ...")` | `define_method` | No |
 | 15 | `rescue NoMethodError` | `respond_to?` | No |
 | 16 | `def foo(&block); block.call; end` | `yield` | No |
 | 17 | `def x; @x; end` | `attr_reader` | No |
 | 18 | `def x=(v); @x=v; end` | `attr_writer` | No |
-| 19 | `for x in arr` | `arr.each` | Yes |
+| 19 | `for x in arr` | `arr.each` | When scope-safe |
 
 Rule 9 only fires when the default has to be constructed (`fetch(k, [])`,
 `fetch(k, "s")`, `fetch(k, Time.now)`). A cheap default — `nil`, a number, a symbol,
 `true`/`false`, a constant, or a variable read — is left alone, because the block's
 invocation cost makes the block form the slower one there. This matches the caveat fast-ruby
 documents next to the benchmark this rule comes from.
+
+Some fixes are only applied when they can't change behavior. Rule 13 is fixed only for
+numeric-literal ranges: on other ranges such as `('a'..'z')`, `include?` checks membership
+while `cover?` compares bounds. Rule 19 is fixed only when the loop body assigns no locals
+and the loop variable isn't used outside the loop, because a `for` loop shares the
+enclosing scope and a block doesn't. In `--fix` mode, any offense whose fix wasn't applied
+is still reported and makes the run exit 1.
 
 ## Inline Disable
 
