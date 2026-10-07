@@ -243,15 +243,15 @@ docker run --rm -v $(pwd):/workspace ghcr.io/7a6163/rubyfast:latest .
 
 Compared against [fasterer](https://github.com/DamirSvrtan/fasterer) (v0.11.0, Ruby + ruby_parser) and a [prism-based fork](https://github.com/mattmenefee/fasterer/tree/native-prism-migration) (Ruby + prism, unreleased).
 
-Corpus: [rubygems.org](https://github.com/rubygems/rubygems.org) at `3c8ea0d4c` — 1,338 Ruby files. Measured with [hyperfine](https://github.com/sharkdp/hyperfine) on Apple Silicon (macOS 26, Ruby 4.0.5); each tool run from the project root, since `fasterer` only scans the current directory.
+Corpus: [rubygems.org](https://github.com/rubygems/rubygems.org) at `3c8ea0d4c` — 1,338 Ruby files. Measured with [hyperfine](https://github.com/sharkdp/hyperfine) on Apple Silicon (macOS 27, Ruby 4.0.5); each tool run from the project root, since `fasterer` only scans the current directory.
 
 | Tool | Parser | Time | Relative |
 |:---|:---|---:|---:|
-| **rubyfast v1.4.0** | Rust + ruby-prism | **64.7 ms** | **1x** |
-| fasterer (prism fork) | Ruby + prism | 546 ms | 8.4x slower |
-| fasterer v0.11.0 | Ruby + ruby_parser | 4.38 s | 68x slower |
+| **rubyfast v2.0.0** | Rust + ruby-prism | **57.5 ms** | **1x** |
+| fasterer (prism fork) | Ruby + prism | 464 ms | 8.1x slower |
+| fasterer v0.11.0 | Ruby + ruby_parser | 4.50 s | 78x slower |
 
-**rubyfast is 68x faster** than the original fasterer and **8.4x faster** than the prism-based Ruby fork.
+**rubyfast is 78x faster** than the original fasterer and **8.1x faster** than the prism-based Ruby fork.
 
 On this corpus rubyfast reports 33 offenses to fasterer's 74. Every rule matches
 exactly except `fetch` (15 vs 56); all 41 of the difference are cheap defaults

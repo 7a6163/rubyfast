@@ -1,5 +1,52 @@
 # Changelog
 
+## [2.0.0] - 2026-10-07
+
+Major because public library items were removed or changed (see **Breaking**). The CLI
+itself has no breaking changes.
+
+### Breaking
+
+- `ast_visitor::for_each_direct_child` and `for_each_descendant` are replaced by
+  `for_each_node`, built on ruby_prism's `Visit` trait
+- `ast_helpers::block_arg_names` is replaced by `sole_block_arg_name`, which returns the
+  name only for a block taking exactly one plain parameter
+- `ast_helpers::receiver_is_range` is renamed `receiver_range` and returns the
+  `RangeNode`
+- `fix::apply_fixes` returns, per fix, whether it was applied (`Vec<bool>`) instead of a
+  replacement count; `fix::apply_fixes_to_file` does the same
+
+### Fixed
+
+- `--fix` no longer changes program behavior:
+  - `for_loop_vs_each` is only fixed when it's scope-safe (the body assigns no locals and
+    the loop variable isn't used outside the loop). A `for` loop shares the enclosing
+    scope and a block doesn't
+  - The `for` → `each` rewrite parenthesizes non-trivial collections
+    (`for x in 1..3` → `(1..3).each`, not `1..3.each`) and leaves trailing comments in
+    place
+  - `include_vs_cover_on_range` is only fixed on numeric-literal ranges; on others such
+    as `('a'..'z')`, `include?` and `cover?` give different answers
+- Each fix is applied all-or-nothing. Offenses whose fix was skipped (overlap, failed
+  syntax check, write error) are reported and make `--fix` exit 1, and "N offenses fixed"
+  counts fixes rather than replacements
+- Offenses are now found in every node kind: rescue modifiers, `||=` / `&&=` / `+=` on
+  calls, parameter defaults, `BEGIN`/`END`, `super do` blocks, regex named captures and
+  pattern guards were previously skipped
+- `block_vs_symbol_to_proc` no longer fires for `|x,|`, `|x, *r|`, `|x, y = 1|`,
+  `|x, &b|` or `x&.foo`
+- Relative `exclude_paths` resolve against the directory holding the config file, so
+  excludes apply when linting a subdirectory or a single file, including on Windows
+- Inline directives: a repeated `disable` keeps its first start line, one `enable` closes
+  it, and `enable all` also closes rule-specific blocks
+
+### Changed
+
+- Fixture tests assert each fixture's complete offense set, with guards that every rule
+  has a fixture and every fixture file is listed
+- Benchmark re-run for v2.0.0 on the same corpus: 57.5 ms, 78x faster than fasterer
+  v0.11.0 and 8.1x faster than the prism fork. Offense counts are unchanged (33 vs 74)
+
 ## [1.4.0] - 2026-09-10
 
 ### Security
