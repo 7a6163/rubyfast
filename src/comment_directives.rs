@@ -79,11 +79,14 @@ pub fn build_disabled_set(
                     // Standalone comment — block start
                     for target in &targets {
                         match target {
+                            // A repeated disable keeps the block's original start.
                             Target::All => {
-                                block_all_start = Some(comment_line + 1);
+                                block_all_start.get_or_insert(comment_line + 1);
                             }
                             Target::Rule(kind) => {
-                                block_rule_starts.push((*kind, comment_line + 1));
+                                if !block_rule_starts.iter().any(|(k, _)| k == kind) {
+                                    block_rule_starts.push((*kind, comment_line + 1));
+                                }
                             }
                         }
                     }
@@ -93,15 +96,21 @@ pub fn build_disabled_set(
                     let end_line = comment_line; // exclusive
                     for target in &targets {
                         match target {
+                            // `enable all` also ends blocks opened for specific rules.
                             Target::All => {
                                 if let Some(start) = block_all_start.take() {
                                     for line in start..end_line {
                                         all_disabled_lines.insert(line);
                                     }
                                 }
+                                for (kind, start) in block_rule_starts.drain(..) {
+                                    for line in start..end_line {
+                                        rule_disabled_lines.insert((line, kind));
+                                    }
+                                }
                             }
                             Target::Rule(kind) => {
-                                let idx = block_rule_starts.iter().rposition(|(k, _)| k == kind);
+                                let idx = block_rule_starts.iter().position(|(k, _)| k == kind);
                                 if let Some(i) = idx {
                                     let (_, start) = block_rule_starts.remove(i);
                                     for line in start..end_line {
@@ -262,6 +271,37 @@ mod tests {
         assert!(!set.is_disabled(1, OffenseKind::ShuffleFirstVsSample));
         assert!(set.is_disabled(2, OffenseKind::ShuffleFirstVsSample));
         assert!(!set.is_disabled(3, OffenseKind::ShuffleFirstVsSample));
+    }
+
+    #[test]
+    fn repeated_disable_all_keeps_the_first_start() {
+        let set = parse_and_build(
+            "# rubyfast:disable all\na\n# rubyfast:disable all\nb\n# rubyfast:enable all\nc\n",
+        );
+        assert!(set.is_disabled(2, OffenseKind::ShuffleFirstVsSample));
+        assert!(set.is_disabled(4, OffenseKind::ShuffleFirstVsSample));
+        assert!(!set.is_disabled(6, OffenseKind::ShuffleFirstVsSample));
+    }
+
+    #[test]
+    fn repeated_rule_disable_is_closed_by_one_enable() {
+        let set = parse_and_build(
+            "# rubyfast:disable gsub_vs_tr\na\n# rubyfast:disable gsub_vs_tr\nb\n# rubyfast:enable gsub_vs_tr\nc\n",
+        );
+        assert!(set.is_disabled(2, OffenseKind::GsubVsTr));
+        assert!(set.is_disabled(4, OffenseKind::GsubVsTr));
+        assert!(!set.is_disabled(6, OffenseKind::GsubVsTr));
+    }
+
+    #[test]
+    fn enable_all_closes_rule_blocks() {
+        let set = parse_and_build(
+            "# rubyfast:disable gsub_vs_tr, for_loop_vs_each\na\n# rubyfast:enable all\nb\n",
+        );
+        assert!(set.is_disabled(2, OffenseKind::GsubVsTr));
+        assert!(set.is_disabled(2, OffenseKind::ForLoopVsEach));
+        assert!(!set.is_disabled(4, OffenseKind::GsubVsTr));
+        assert!(!set.is_disabled(4, OffenseKind::ForLoopVsEach));
     }
 
     #[test]

@@ -278,3 +278,56 @@ fn fix_mode_keeps_include_on_string_range() {
     assert_eq!(code, Some(1), "stdout: {}", stdout);
     assert_eq!(content, src);
 }
+
+/// A repo with a root config excluding `vendor/`, an excluded offense in
+/// `vendor/v.rb` and a reported one in `app/a.rb`.
+fn repo_with_vendor_exclude() -> tempfile::TempDir {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(dir.path().join("vendor")).unwrap();
+    std::fs::create_dir_all(dir.path().join("app")).unwrap();
+    std::fs::write(
+        dir.path().join(".rubyfast.yml"),
+        "exclude_paths:\n  - 'vendor/**/*.rb'\n",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("vendor/v.rb"), "arr.shuffle.first\n").unwrap();
+    std::fs::write(dir.path().join("app/a.rb"), "arr.shuffle.first\n").unwrap();
+    dir
+}
+
+#[test]
+fn exclude_paths_resolve_against_the_config_dir() {
+    let dir = repo_with_vendor_exclude();
+    // (working dir, path argument): every way of pointing at the excluded file.
+    for (cwd, arg) in [
+        ("", "vendor/v.rb"),
+        ("", "vendor"),
+        ("vendor", "v.rb"),
+        ("vendor", "."),
+        ("app", "../vendor"),
+    ] {
+        let output = cargo_bin()
+            .current_dir(dir.path().join(cwd))
+            .arg(arg)
+            .output()
+            .expect("Failed to run");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && stdout.contains("0 files inspected"),
+            "cwd={cwd:?} arg={arg:?} stdout: {stdout}"
+        );
+    }
+}
+
+#[test]
+fn exclude_paths_keep_other_files_when_scanning_from_a_subdir() {
+    let dir = repo_with_vendor_exclude();
+    let output = cargo_bin()
+        .current_dir(dir.path().join("app"))
+        .arg("..")
+        .output()
+        .expect("Failed to run");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(1), "stdout: {stdout}");
+    assert!(stdout.contains("1 file inspected"), "stdout: {stdout}");
+}

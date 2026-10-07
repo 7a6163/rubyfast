@@ -22,7 +22,10 @@ fn main() {
     }
 
     let base_dir = if path.is_file() {
-        path.parent().unwrap_or(Path::new("."))
+        // `x.rb` has an empty parent, which can't be canonicalized or walked up from.
+        path.parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."))
     } else {
         path
     };

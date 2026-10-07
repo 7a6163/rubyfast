@@ -27,7 +27,8 @@ impl TraversalResult {
 /// Find all .rb files, filter by config, and analyze them in parallel.
 pub fn traverse_and_analyze(path: &Path, config: &Config) -> TraversalResult {
     let files = collect_ruby_files(path);
-    let excluded = collect_excluded_files(&config.exclude_patterns, path);
+    let exclude_root = config.exclude_root.as_deref().unwrap_or(path);
+    let excluded = collect_excluded_files(&config.exclude_patterns, exclude_root);
     let scannable: Vec<PathBuf> = files
         .into_iter()
         .filter(|f| !is_excluded(f, &excluded))
@@ -76,7 +77,7 @@ fn collect_ruby_files(path: &Path) -> Vec<PathBuf> {
         .unwrap_or_default()
 }
 
-/// Expand exclude patterns relative to a base path, pre-canonicalizing results.
+/// Expand exclude patterns relative to a base directory, pre-canonicalizing results.
 fn collect_excluded_files(patterns: &[String], base: &Path) -> HashSet<PathBuf> {
     patterns
         .iter()
@@ -84,7 +85,11 @@ fn collect_excluded_files(patterns: &[String], base: &Path) -> HashSet<PathBuf> 
             let full_pattern = if Path::new(pattern).is_absolute() {
                 pattern.clone()
             } else {
-                format!("{}/{}", base.display(), pattern)
+                format!(
+                    "{}/{}",
+                    glob::Pattern::escape(&base.display().to_string()),
+                    pattern
+                )
             };
             match glob::glob(&full_pattern) {
                 Ok(paths) => paths

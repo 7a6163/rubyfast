@@ -34,7 +34,7 @@ fn is_no_method_error_const(node: &Node<'_>) -> bool {
 mod tests {
     use super::*;
     use crate::ast_helpers::test_helpers::leak_parse;
-    use crate::ast_visitor::for_each_direct_child;
+    use crate::ast_visitor::for_each_node;
 
     fn parse_and_find_rescue_bodies(source: &[u8]) -> Vec<Offense> {
         let result = leak_parse(source);
@@ -43,15 +43,12 @@ mod tests {
         offenses
     }
 
-    fn collect_rescue_offenses<'pr>(node: &Node<'pr>, offenses: &mut Vec<Offense>) {
-        // For BeginNode, we need to access the rescue clause specially
-        if let Some(begin) = node.as_begin_node()
-            && let Some(rescue) = begin.rescue_clause()
-        {
-            collect_from_rescue_chain(&rescue, offenses);
-        }
-        for_each_direct_child(node, &mut |child| {
-            collect_rescue_offenses(child, offenses);
+    fn collect_rescue_offenses(node: &Node<'_>, offenses: &mut Vec<Offense>) {
+        // RescueNode is reached through a typed visit, so start from its BeginNode.
+        for_each_node(node, |n| {
+            if let Some(rescue) = n.as_begin_node().and_then(|b| b.rescue_clause()) {
+                collect_from_rescue_chain(&rescue, offenses);
+            }
         });
     }
 

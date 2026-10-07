@@ -390,12 +390,10 @@ fn check_block_vs_symbol_to_proc(
         return;
     }
 
-    // Block must have exactly 1 argument
-    let arg_names = block_arg_names(&block.parameters());
-    if arg_names.len() != 1 {
+    // Block must take exactly one plain argument
+    let Some(block_arg_name) = sole_block_arg_name(&block.parameters()) else {
         return;
-    }
-    let block_arg_name = &arg_names[0];
+    };
 
     // Block body must be a single expression
     let inner_node = match crate::ast_helpers::body_single_expression(block.body()) {
@@ -408,8 +406,11 @@ fn check_block_vs_symbol_to_proc(
         None => return,
     };
 
-    // Inner call must have 0 arguments and no block
-    if arg_count(&inner_call) != 0 || inner_call.block().is_some() {
+    // Inner call must have 0 arguments, no block, and no `&.` (which `&:foo` can't express)
+    if arg_count(&inner_call) != 0
+        || inner_call.block().is_some()
+        || inner_call.is_safe_navigation()
+    {
         return;
     }
 
@@ -439,67 +440,14 @@ fn check_block_vs_symbol_to_proc(
 mod tests {
     use super::*;
     use crate::ast_helpers::test_helpers::leak_parse;
-    use crate::ast_visitor::for_each_direct_child;
     use crate::offense::has_kind;
-    use ruby_prism::Node;
 
     fn parse_and_collect(source: &[u8]) -> Vec<Offense> {
         let result = leak_parse(source);
         let frozen = result
             .magic_comments()
             .any(|c| c.key() == b"frozen_string_literal" && c.value() == b"true");
-        let mut offenses = Vec::new();
-        let root = result.node();
-        walk_for_offenses(&root, frozen, &mut offenses);
-        offenses
-    }
-
-    /// Walk AST matching real analyzer behavior.
-    fn walk_for_offenses<'pr>(node: &Node<'pr>, frozen: bool, offenses: &mut Vec<Offense>) {
-        match node {
-            Node::CallNode { .. } => {
-                let call = node.as_call_node().unwrap();
-
-                // Check receiver-is-block-call chains
-                if let Some(recv) = call.receiver()
-                    && let Some(recv_call) = recv.as_call_node()
-                    && let Some(Node::BlockNode { .. }) = recv_call.block()
-                {
-                    offenses.extend(scan_call_on_block_call(&call, &recv_call));
-                }
-
-                match call.block() {
-                    Some(Node::BlockNode { .. }) => {
-                        let block = call.block().unwrap().as_block_node().unwrap();
-                        offenses.extend(scan_call_with_block(&call, &block));
-                        // Walk receiver and arguments
-                        if let Some(recv) = call.receiver() {
-                            walk_for_offenses(&recv, frozen, offenses);
-                        }
-                        if let Some(args) = call.arguments() {
-                            for arg in args.arguments().iter() {
-                                walk_for_offenses(&arg, frozen, offenses);
-                            }
-                        }
-                        // Walk block body
-                        if let Some(body) = block.body() {
-                            walk_for_offenses(&body, frozen, offenses);
-                        }
-                    }
-                    _ => {
-                        offenses.extend(scan_call(&call, frozen));
-                        for_each_direct_child(node, &mut |child| {
-                            walk_for_offenses(child, frozen, offenses);
-                        });
-                    }
-                }
-            }
-            _ => {
-                for_each_direct_child(node, &mut |child| {
-                    walk_for_offenses(child, frozen, offenses);
-                });
-            }
-        }
+        crate::analyzer::scan_tree(&result.node(), source, frozen)
     }
 
     #[test]
@@ -860,6 +808,26 @@ mod tests {
     fn sort_without_block_no_fire() {
         let o = parse_and_collect(b"arr.sort");
         assert!(!has_kind(&o, OffenseKind::SortVsSortBy));
+    }
+
+    #[test]
+    fn block_with_extra_params_no_symbol_to_proc() {
+        // `|x,|` destructures; the others take more than one argument.
+        for src in [
+            "pairs.map { |x,| x.foo }",
+            "arr.map { |x, *r| x.foo }",
+            "arr.map { |x, y = 1| x.foo }",
+            "arr.map { |x, &b| x.foo }",
+        ] {
+            let o = parse_and_collect(src.as_bytes());
+            assert!(!has_kind(&o, OffenseKind::BlockVsSymbolToProc), "{src}");
+        }
+    }
+
+    #[test]
+    fn safe_navigation_no_symbol_to_proc() {
+        let o = parse_and_collect(b"arr.map { |x| x&.foo }");
+        assert!(!has_kind(&o, OffenseKind::BlockVsSymbolToProc));
     }
 
     #[test]
