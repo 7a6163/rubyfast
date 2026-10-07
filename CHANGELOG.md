@@ -44,6 +44,8 @@ itself has no breaking changes.
 
 - Fixture tests assert each fixture's complete offense set, with guards that every rule
   has a fixture and every fixture file is listed
+- Benchmark re-run for v2.0.0 on the same corpus: 57.5 ms, 78x faster than fasterer
+  v0.11.0 and 8.1x faster than the prism fork. Offense counts are unchanged (33 vs 74)
 
 ## [1.4.0] - 2026-09-10
 
