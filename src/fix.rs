@@ -50,30 +50,35 @@ impl Fix {
     }
 }
 
-/// Apply a set of fixes to source bytes. Returns the fixed source.
-/// Fixes are applied in reverse byte order to preserve offsets.
-/// Overlapping replacements are skipped.
-/// Returns the fixed source and the number of replacements actually applied.
-pub fn apply_fixes(source: &[u8], fixes: &[Fix]) -> (Vec<u8>, usize) {
-    // Flatten all replacements and sort by start descending
-    let mut replacements: Vec<&Replacement> = fixes.iter().flat_map(|f| &f.replacements).collect();
+/// Apply a set of fixes to source bytes. Returns the fixed source and, per fix, whether it
+/// was applied. Each fix is all-or-nothing: if any of its replacements is out of bounds or
+/// overlaps an earlier accepted fix, none of it is applied.
+pub fn apply_fixes(source: &[u8], fixes: &[Fix]) -> (Vec<u8>, Vec<bool>) {
+    let mut accepted: Vec<&Replacement> = Vec::new();
+    let applied: Vec<bool> = fixes
+        .iter()
+        .map(|fix| {
+            let ok = fix.replacements.iter().enumerate().all(|(i, r)| {
+                r.start <= r.end
+                    && r.end <= source.len()
+                    && !accepted
+                        .iter()
+                        .copied()
+                        .chain(&fix.replacements[..i])
+                        .any(|a| r.start < a.end && a.start < r.end)
+            });
+            if ok {
+                accepted.extend(&fix.replacements);
+            }
+            ok
+        })
+        .collect();
 
-    replacements.sort_by_key(|r| std::cmp::Reverse(r.start));
-
+    accepted.sort_by_key(|r| std::cmp::Reverse(r.start));
     let mut result = source.to_vec();
-    let mut last_start = usize::MAX;
-    let mut applied = 0;
-
-    for r in &replacements {
-        // Skip overlapping or out-of-bounds replacements
-        if r.end > last_start || r.start > result.len() || r.end > result.len() {
-            continue;
-        }
+    for r in accepted {
         result.splice(r.start..r.end, r.text.bytes());
-        last_start = r.start;
-        applied += 1;
     }
-
     (result, applied)
 }
 
@@ -84,10 +89,10 @@ pub fn verify_syntax(source: &[u8]) -> bool {
 }
 
 /// Apply fixes to a file: read -> fix -> verify syntax -> write.
-/// Returns the number of fixes applied, or an error.
-pub fn apply_fixes_to_file(path: &Path, fixes: &[Fix]) -> Result<usize, String> {
+/// Returns, per fix, whether it was applied; on error nothing was written.
+pub fn apply_fixes_to_file(path: &Path, fixes: &[Fix]) -> Result<Vec<bool>, String> {
     if fixes.is_empty() {
-        return Ok(0);
+        return Ok(vec![]);
     }
 
     let source =
@@ -115,61 +120,65 @@ mod tests {
     fn single_replacement() {
         let source = b"hello world";
         let fix = Fix::single(6, 11, "rust");
-        let (result, count) = apply_fixes(source, &[fix]);
+        let (result, applied) = apply_fixes(source, &[fix]);
         assert_eq!(result, b"hello rust");
-        assert_eq!(count, 1);
+        assert_eq!(applied, [true]);
     }
 
     #[test]
     fn adjacent_replacements_both_apply() {
         // r1.end == r2.start — touching, not overlapping.
         let source = b"abcdef";
-        let (result, count) =
+        let (result, applied) =
             apply_fixes(source, &[Fix::single(0, 3, "X"), Fix::single(3, 6, "Y")]);
         assert_eq!(result, b"XY");
-        assert_eq!(count, 2);
+        assert_eq!(applied, [true, true]);
+        let (result, applied) =
+            apply_fixes(source, &[Fix::single(3, 6, "Y"), Fix::single(0, 3, "X")]);
+        assert_eq!(result, b"XY");
+        assert_eq!(applied, [true, true]);
     }
 
     #[test]
     fn overlapping_replacements_skip_the_later_one() {
         let source = b"abcdef";
-        let (result, count) =
+        let (result, applied) =
             apply_fixes(source, &[Fix::single(0, 4, "X"), Fix::single(2, 6, "Y")]);
-        assert_eq!(result, b"abY");
-        assert_eq!(count, 1);
+        assert_eq!(result, b"Xef");
+        assert_eq!(applied, [true, false]);
     }
 
     #[test]
     fn replacement_at_end_of_source_applies() {
         let source = b"abc";
-        let (result, count) = apply_fixes(source, &[Fix::single(3, 3, "!")]);
+        let (result, applied) = apply_fixes(source, &[Fix::single(3, 3, "!")]);
         assert_eq!(result, b"abc!");
-        assert_eq!(count, 1);
+        assert_eq!(applied, [true]);
     }
 
     #[test]
     fn out_of_bounds_replacement_is_skipped() {
         let source = b"abc";
-        let (result, count) = apply_fixes(source, &[Fix::single(4, 9, "!")]);
+        let (result, applied) = apply_fixes(source, &[Fix::single(4, 9, "!")]);
         assert_eq!(result, b"abc");
-        assert_eq!(count, 0);
+        assert_eq!(applied, [false]);
     }
 
     #[test]
     fn replacement_starting_in_bounds_but_ending_past_the_end_is_skipped() {
         let source = b"abc";
-        let (result, count) = apply_fixes(source, &[Fix::single(2, 9, "!")]);
+        let (result, applied) = apply_fixes(source, &[Fix::single(2, 9, "!")]);
         assert_eq!(result, b"abc");
-        assert_eq!(count, 0);
+        assert_eq!(applied, [false]);
     }
 
     #[test]
     fn multiple_non_overlapping() {
         let source = b"foo.bar.baz";
         let fixes = vec![Fix::single(0, 3, "qux"), Fix::single(8, 11, "quux")];
-        let (result, count) = apply_fixes(source, &fixes);
+        let (result, applied) = apply_fixes(source, &fixes);
         assert_eq!(result, b"qux.bar.quux");
-        assert_eq!(count, 2);
+        assert_eq!(applied, [true, true]);
     }
 
     #[test]
@@ -179,9 +188,34 @@ mod tests {
             Fix::single(2, 6, "XX"), // replace cdef with XX
             Fix::single(4, 8, "YY"), // overlaps — should be skipped
         ];
-        let (result, count) = apply_fixes(source, &fixes);
-        assert_eq!(result, b"abcdYY");
-        assert_eq!(count, 1); // one replacement applied, the overlapping one skipped
+        let (result, applied) = apply_fixes(source, &fixes);
+        assert_eq!(result, b"abXXgh");
+        assert_eq!(applied, [true, false]);
+    }
+
+    #[test]
+    fn multi_replacement_fix_is_all_or_nothing() {
+        // The second fix's first replacement is fine, but its second overlaps the first fix,
+        // so neither of its replacements may be applied.
+        let source = b"abcdefgh";
+        let fixes = vec![Fix::single(4, 6, "X"), Fix::two(0, 1, "A", 5, 7, "B")];
+        let (result, applied) = apply_fixes(source, &fixes);
+        assert_eq!(result, b"abcdXgh");
+        assert_eq!(applied, [true, false]);
+    }
+
+    #[test]
+    fn fix_with_self_overlapping_replacements_is_skipped() {
+        let (result, applied) = apply_fixes(b"abcdef", &[Fix::two(0, 3, "X", 2, 4, "Y")]);
+        assert_eq!(result, b"abcdef");
+        assert_eq!(applied, [false]);
+    }
+
+    #[test]
+    fn inverted_range_is_skipped() {
+        let (result, applied) = apply_fixes(b"abc", &[Fix::single(2, 1, "X")]);
+        assert_eq!(result, b"abc");
+        assert_eq!(applied, [false]);
     }
 
     #[test]
@@ -201,26 +235,26 @@ mod tests {
             4, 7, "flat_map", // "map" -> "flat_map"
             19, 30, "", // delete ".flatten(1)"
         );
-        let (result, count) = apply_fixes(source, &[fix]);
+        let (result, applied) = apply_fixes(source, &[fix]);
         assert_eq!(result, b"arr.flat_map { |x| [x] }");
-        assert_eq!(count, 2); // two replacements in one fix
+        assert_eq!(applied, [true]);
     }
 
     #[test]
     fn apply_fixes_empty_fixes() {
         let source = b"hello world";
-        let (result, count) = apply_fixes(source, &[]);
+        let (result, applied) = apply_fixes(source, &[]);
         assert_eq!(result, source);
-        assert_eq!(count, 0);
+        assert!(applied.is_empty());
     }
 
     #[test]
     fn apply_fixes_out_of_bounds_skipped() {
         let source = b"short";
         let fix = Fix::single(10, 20, "big");
-        let (result, count) = apply_fixes(source, &[fix]);
+        let (result, applied) = apply_fixes(source, &[fix]);
         assert_eq!(result, b"short");
-        assert_eq!(count, 0);
+        assert_eq!(applied, [false]);
     }
 
     #[test]
@@ -229,7 +263,7 @@ mod tests {
         let file = dir.path().join("test.rb");
         std::fs::write(&file, "x = 1").unwrap();
         let result = apply_fixes_to_file(&file, &[]).unwrap();
-        assert_eq!(result, 0);
+        assert!(result.is_empty());
     }
 
     #[test]
@@ -239,7 +273,7 @@ mod tests {
         std::fs::write(&file, "for x in [1]; end").unwrap();
         let fix = Fix::single(0, 14, "[1].each do |x|;");
         let result = apply_fixes_to_file(&file, &[fix]).unwrap();
-        assert_eq!(result, 1);
+        assert_eq!(result, [true]);
     }
 
     #[test]

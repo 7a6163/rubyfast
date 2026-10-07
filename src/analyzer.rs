@@ -1,9 +1,8 @@
 use std::path::Path;
 
-use ruby_prism::Node;
+use ruby_prism::{Node, Visit};
 
 use crate::ast_helpers::{byte_offset_to_line, compute_newline_positions};
-use crate::ast_visitor::for_each_direct_child;
 use crate::comment_directives::build_disabled_set;
 use crate::config::Config;
 use crate::offense::Offense;
@@ -53,12 +52,7 @@ pub fn analyze_file(path: &Path, config: &Config) -> Result<AnalysisResult, Pars
 
     let disabled_set = build_disabled_set(&result, &source, &newline_positions);
 
-    let mut offenses = Vec::new();
-    let ctx = FileContext {
-        source: &source,
-        frozen_string_literals: has_frozen_string_literals(&result),
-    };
-    walk_node(&root, &mut offenses, ctx);
+    let offenses = scan_tree(&root, &source, has_frozen_string_literals(&result));
 
     // Resolve byte offsets to line numbers, then filter by config and inline directives
     let offenses = offenses
@@ -96,127 +90,70 @@ fn has_frozen_string_literals(result: &ruby_prism::ParseResult<'_>) -> bool {
         .any(|c| c.key() == b"frozen_string_literal" && c.value() == b"true")
 }
 
-/// Walk each statement of an optional StatementsNode.
-fn walk_stmts(
-    stmts: Option<ruby_prism::StatementsNode<'_>>,
-    offenses: &mut Vec<Offense>,
-    ctx: FileContext<'_>,
-) {
-    let Some(stmts) = stmts else { return };
-    for child in stmts.body().iter() {
-        walk_node(&child, offenses, ctx);
-    }
+/// Run every scanner over the tree under `root`, returning offenses with byte offsets.
+pub(crate) fn scan_tree(
+    root: &Node<'_>,
+    source: &[u8],
+    frozen_string_literals: bool,
+) -> Vec<Offense> {
+    let mut walker = Walker {
+        offenses: Vec::new(),
+        ctx: FileContext {
+            source,
+            frozen_string_literals,
+        },
+    };
+    walker.visit(root);
+    walker.offenses
 }
 
-/// Walk an optional child node.
-fn walk_opt(node: Option<Node<'_>>, offenses: &mut Vec<Offense>, ctx: FileContext<'_>) {
-    if let Some(node) = node {
-        walk_node(&node, offenses, ctx);
-    }
+/// Dispatches rule-carrying nodes to the scanners; prism's default visitors handle descent,
+/// so every node kind is reached.
+struct Walker<'a> {
+    offenses: Vec<Offense>,
+    ctx: FileContext<'a>,
 }
 
-/// Recursively walk the AST, dispatching to scanners.
-fn walk_node(node: &Node<'_>, offenses: &mut Vec<Offense>, ctx: FileContext<'_>) {
-    match node {
-        Node::ForNode { .. } => {
-            let f = node.as_for_node().unwrap();
-            offenses.extend(for_loop_scanner::scan(&f, ctx.source));
-            for_each_direct_child(node, &mut |child| walk_node(child, offenses, ctx));
-        }
-        Node::BeginNode { .. } => {
-            let begin = node.as_begin_node().unwrap();
-            walk_stmts(begin.statements(), offenses, ctx);
-            if let Some(rescue) = begin.rescue_clause() {
-                walk_rescue_node(&rescue, offenses, ctx);
-            }
-            walk_stmts(
-                begin.else_clause().and_then(|c| c.statements()),
-                offenses,
-                ctx,
-            );
-            walk_stmts(
-                begin.ensure_clause().and_then(|c| c.statements()),
-                offenses,
-                ctx,
-            );
-        }
-        Node::DefNode { .. } => {
-            let d = node.as_def_node().unwrap();
-            offenses.extend(method_definition_scanner::scan(&d));
-            walk_opt(d.body(), offenses, ctx);
-        }
-        Node::CallNode { .. } => {
-            let call = node.as_call_node().unwrap();
+impl<'pr> Visit<'pr> for Walker<'_> {
+    fn visit_for_node(&mut self, node: &ruby_prism::ForNode<'pr>) {
+        self.offenses
+            .extend(for_loop_scanner::scan(node, self.ctx.source));
+        ruby_prism::visit_for_node(self, node);
+    }
 
-            // Check if receiver is a CallNode with a BlockNode (chained: .select{}.first)
-            if let Some(recv) = call.receiver()
-                && let Some(recv_call) = recv.as_call_node()
-                && let Some(Node::BlockNode { .. }) = recv_call.block()
-            {
-                offenses.extend(method_call_scanner::scan_call_on_block_call(
-                    &call, &recv_call,
+    fn visit_def_node(&mut self, node: &ruby_prism::DefNode<'pr>) {
+        self.offenses.extend(method_definition_scanner::scan(node));
+        ruby_prism::visit_def_node(self, node);
+    }
+
+    // Also reached for each `subsequent` clause, which prism visits via this method.
+    fn visit_rescue_node(&mut self, node: &ruby_prism::RescueNode<'pr>) {
+        self.offenses.extend(rescue_scanner::scan(node));
+        ruby_prism::visit_rescue_node(self, node);
+    }
+
+    fn visit_call_node(&mut self, call: &ruby_prism::CallNode<'pr>) {
+        // Chained on a block call (`.select{}.first`): prism hangs the block off the receiver.
+        if let Some(recv) = call.receiver()
+            && let Some(recv_call) = recv.as_call_node()
+            && let Some(Node::BlockNode { .. }) = recv_call.block()
+        {
+            self.offenses
+                .extend(method_call_scanner::scan_call_on_block_call(
+                    call, &recv_call,
                 ));
-            }
-
-            // Check if this call has a block (CallNode owns BlockNode in prism)
-            match call.block() {
-                Some(Node::BlockNode { .. }) => {
-                    let block = call.block().unwrap().as_block_node().unwrap();
-                    offenses.extend(method_call_scanner::scan_call_with_block(&call, &block));
-                    walk_call_children(&call, offenses, ctx);
-                    walk_opt(block.body(), offenses, ctx);
-                }
-                _ => {
-                    offenses.extend(method_call_scanner::scan_call(
-                        &call,
-                        ctx.frozen_string_literals,
-                    ));
-                    walk_call_children(&call, offenses, ctx);
-                    walk_opt(call.block(), offenses, ctx);
-                }
-            }
         }
-        _ => {
-            for_each_direct_child(node, &mut |child| walk_node(child, offenses, ctx));
+
+        match call.block().and_then(|b| b.as_block_node()) {
+            Some(block) => self
+                .offenses
+                .extend(method_call_scanner::scan_call_with_block(call, &block)),
+            None => self.offenses.extend(method_call_scanner::scan_call(
+                call,
+                self.ctx.frozen_string_literals,
+            )),
         }
-    }
-}
-
-/// Walk a RescueNode and its chain of subsequent rescue clauses.
-fn walk_rescue_node(
-    rescue: &ruby_prism::RescueNode<'_>,
-    offenses: &mut Vec<Offense>,
-    ctx: FileContext<'_>,
-) {
-    offenses.extend(rescue_scanner::scan(rescue));
-
-    // Walk exception list
-    for exc in rescue.exceptions().iter() {
-        walk_node(&exc, offenses, ctx);
-    }
-    // Walk reference
-    walk_opt(rescue.reference(), offenses, ctx);
-    // Walk statements
-    walk_stmts(rescue.statements(), offenses, ctx);
-    // Walk subsequent rescue clauses
-    if let Some(subsequent) = rescue.subsequent() {
-        walk_rescue_node(&subsequent, offenses, ctx);
-    }
-}
-
-/// Walk a CallNode's receiver and arguments (shared by block and non-block paths).
-fn walk_call_children(
-    call: &ruby_prism::CallNode<'_>,
-    offenses: &mut Vec<Offense>,
-    ctx: FileContext<'_>,
-) {
-    if let Some(recv) = call.receiver() {
-        walk_node(&recv, offenses, ctx);
-    }
-    if let Some(args) = call.arguments() {
-        for arg in args.arguments().iter() {
-            walk_node(&arg, offenses, ctx);
-        }
+        ruby_prism::visit_call_node(self, call);
     }
 }
 
@@ -250,6 +187,40 @@ mod tests {
         assert_eq!(byte_offset_to_line(&positions, 5), 1);
         assert_eq!(byte_offset_to_line(&positions, 6), 2);
         assert_eq!(byte_offset_to_line(&positions, 12), 3);
+    }
+
+    #[test]
+    fn walk_reaches_every_node_kind() {
+        use crate::offense::OffenseKind;
+        // Each of these used to be skipped by the hand-written traversal.
+        let cases = [
+            "x = arr.shuffle.first rescue nil",
+            "self.foo ||= arr.shuffle.first",
+            "self.foo &&= arr.shuffle.first",
+            "self.foo += arr.shuffle.first",
+            "END { arr.shuffle.first }",
+            "BEGIN { arr.shuffle.first }",
+            "def foo(x = arr.shuffle.first); end",
+            "def foo(x: arr.shuffle.first); end",
+            "def f; super do |x| x.shuffle.first end; end",
+            "/(?<m>a)/ =~ arr.shuffle.first",
+            "case x\nin Integer if arr.shuffle.first\nend",
+        ];
+        for src in cases {
+            let result = ruby_prism::parse(src.as_bytes());
+            let kinds: Vec<_> = super::scan_tree(&result.node(), src.as_bytes(), false)
+                .into_iter()
+                .map(|o| o.kind)
+                .collect();
+            assert_eq!(kinds, [OffenseKind::ShuffleFirstVsSample], "{src}");
+        }
+    }
+
+    #[test]
+    fn walk_scans_every_rescue_clause() {
+        let source = b"begin; rescue ArgumentError; rescue NoMethodError; end";
+        let result = ruby_prism::parse(source);
+        assert_eq!(super::scan_tree(&result.node(), source, false).len(), 1);
     }
 
     #[test]

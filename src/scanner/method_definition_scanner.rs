@@ -4,7 +4,7 @@ use crate::ast_helpers::{
     body_expression_count, body_single_expression, def_block_arg_name, def_first_arg_name,
     def_regular_arg_count,
 };
-use crate::ast_visitor::for_each_descendant;
+use crate::ast_visitor::for_each_node;
 use crate::offense::{Offense, OffenseKind};
 
 /// Scan a method definition for proc_call, getter, and setter offenses.
@@ -36,12 +36,8 @@ fn check_proc_call_vs_yield(def: &ruby_prism::DefNode<'_>, offenses: &mut Vec<Of
 
 fn body_contains_block_call(body: &Option<Node<'_>>, block_name: &str) -> bool {
     let Some(node) = body else { return false };
-    let mut found = node_is_block_call(node, block_name);
-    for_each_descendant(node, &mut |child| {
-        if !found && node_is_block_call(child, block_name) {
-            found = true;
-        }
-    });
+    let mut found = false;
+    for_each_node(node, |n| found |= node_is_block_call(n, block_name));
     found
 }
 
@@ -129,7 +125,7 @@ fn check_setter_vs_attr_writer(def: &ruby_prism::DefNode<'_>, offenses: &mut Vec
 mod tests {
     use super::*;
     use crate::ast_helpers::test_helpers::leak_parse;
-    use crate::ast_visitor::for_each_direct_child;
+    use crate::ast_visitor::for_each_node;
     use crate::offense::has_kind;
 
     fn parse_and_scan(source: &[u8]) -> Vec<Offense> {
@@ -139,12 +135,11 @@ mod tests {
         offenses
     }
 
-    fn collect_def_offenses<'pr>(node: &Node<'pr>, offenses: &mut Vec<Offense>) {
-        if let Some(d) = node.as_def_node() {
-            offenses.extend(scan(&d));
-        }
-        for_each_direct_child(node, &mut |child| {
-            collect_def_offenses(child, offenses);
+    fn collect_def_offenses(node: &Node<'_>, offenses: &mut Vec<Offense>) {
+        for_each_node(node, |n| {
+            if let Some(d) = n.as_def_node() {
+                offenses.extend(scan(&d));
+            }
         });
     }
 

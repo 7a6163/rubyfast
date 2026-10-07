@@ -76,18 +76,13 @@ pub fn is_single_char_string(node: &Node<'_>) -> bool {
 
 /// Check if the receiver is a range (RangeNode, inclusive or exclusive).
 /// Also handles parenthesized ranges: `(1..10)` parses as `ParenthesesNode(RangeNode)`.
-pub fn receiver_is_range(recv: &Option<Node<'_>>) -> bool {
-    let Some(node) = recv else { return false };
-    if node.as_range_node().is_some() {
-        return true;
+pub fn receiver_range<'pr>(recv: &Option<Node<'pr>>) -> Option<ruby_prism::RangeNode<'pr>> {
+    let node = recv.as_ref()?;
+    if let Some(range) = node.as_range_node() {
+        return Some(range);
     }
-    let Some(paren) = node.as_parentheses_node() else {
-        return false;
-    };
-    let Some(body) = paren.body() else {
-        return false;
-    };
-    body_single_expression(Some(body)).is_some_and(|expr| expr.as_range_node().is_some())
+    let body = node.as_parentheses_node()?.body()?;
+    body_single_expression(Some(body))?.as_range_node()
 }
 
 /// Check if a node is a literal/primitive (not a variable reference or method call).
@@ -174,28 +169,20 @@ pub fn is_int_one(node: &Node<'_>) -> bool {
     }
 }
 
-/// Get block argument names from a BlockNode's parameters.
-/// BlockNode.parameters() returns Option<Node> which is typically a BlockParametersNode.
-pub fn block_arg_names(params: &Option<Node<'_>>) -> Vec<String> {
-    match params {
-        Some(node) => {
-            if let Some(block_params) = node.as_block_parameters_node()
-                && let Some(inner_params) = block_params.parameters()
-            {
-                return inner_params
-                    .requireds()
-                    .iter()
-                    .filter_map(|p| {
-                        p.as_required_parameter_node()
-                            .map(|rp| String::from_utf8_lossy(rp.name().as_slice()).to_string())
-                    })
-                    .collect();
-            }
-            // Handle NumberedParametersNode or other cases
-            Vec::new()
-        }
-        None => Vec::new(),
-    }
+/// The block's parameter name when it takes exactly one plain parameter (`|x|`).
+/// `|x,|`, `|x, *r|`, `|x, y = 1|`, `|x, k:|`, `|x, &b|`, numbered params, etc. give None.
+pub fn sole_block_arg_name(params: &Option<Node<'_>>) -> Option<String> {
+    let p = params.as_ref()?.as_block_parameters_node()?.parameters()?;
+    let only_required = p.optionals().iter().next().is_none()
+        && p.rest().is_none()
+        && p.posts().iter().next().is_none()
+        && p.keywords().iter().next().is_none()
+        && p.keyword_rest().is_none()
+        && p.block().is_none();
+    let mut requireds = p.requireds().iter();
+    let first = requireds.next()?.as_required_parameter_node()?;
+    (only_required && requireds.next().is_none())
+        .then(|| String::from_utf8_lossy(first.name().as_slice()).into_owned())
 }
 
 /// Check if a DefNode has a block argument (&block), returning its name if so.
@@ -392,21 +379,21 @@ mod tests {
     fn receiver_is_range_inclusive() {
         let node = parse_first_stmt(b"(1..10).include?(5)");
         let call = node.as_call_node().unwrap();
-        assert!(receiver_is_range(&call.receiver()));
+        assert!(receiver_range(&call.receiver()).is_some());
     }
 
     #[test]
     fn receiver_is_range_exclusive() {
         let node = parse_first_stmt(b"(1...10).include?(5)");
         let call = node.as_call_node().unwrap();
-        assert!(receiver_is_range(&call.receiver()));
+        assert!(receiver_range(&call.receiver()).is_some());
     }
 
     #[test]
     fn receiver_is_range_not_range() {
         let node = parse_first_stmt(b"[1].include?(5)");
         let call = node.as_call_node().unwrap();
-        assert!(!receiver_is_range(&call.receiver()));
+        assert!(receiver_range(&call.receiver()).is_none());
     }
 
     #[test]
@@ -460,27 +447,45 @@ mod tests {
         assert!(!is_int_one(&parse_first_stmt(b"'1'")));
     }
 
-    /// Names of the block parameters of `source`'s first statement.
-    fn first_block_arg_names(source: &[u8]) -> Vec<String> {
+    /// The sole block parameter name of `source`'s first statement.
+    fn first_block_arg(source: &[u8]) -> Option<String> {
         let node = parse_first_stmt(source);
         let call = node.as_call_node().expect("expected a CallNode");
         let block = call.block().expect("expected a block");
         let block = block.as_block_node().expect("expected a BlockNode");
-        block_arg_names(&block.parameters())
+        sole_block_arg_name(&block.parameters())
     }
 
     #[test]
-    fn block_arg_names_single() {
+    fn sole_block_arg_single() {
+        assert_eq!(first_block_arg(b"arr.map { |x| x }").as_deref(), Some("x"));
         assert_eq!(
-            first_block_arg_names(b"arr.map { |x| x }"),
-            vec!["x".to_string()]
+            first_block_arg(b"arr.map { |x; y| x }").as_deref(),
+            Some("x")
         );
     }
 
     #[test]
-    fn block_arg_names_none() {
-        let names = block_arg_names(&None);
-        assert!(names.is_empty());
+    fn sole_block_arg_rejects_other_parameter_kinds() {
+        for src in [
+            "arr.map { |x,| x }",
+            "arr.map { |x, *r| x }",
+            "arr.map { |*r, x| x }",
+            "arr.map { |x, y = 1| x }",
+            "arr.map { |x, k:| x }",
+            "arr.map { |x, **o| x }",
+            "arr.map { |x, &b| x }",
+            "arr.map { |(a, b)| a }",
+            "arr.map { || 1 }",
+            "arr.map { |y = 1| y }",
+        ] {
+            assert_eq!(first_block_arg(src.as_bytes()), None, "{src}");
+        }
+    }
+
+    #[test]
+    fn sole_block_arg_none() {
+        assert_eq!(sole_block_arg_name(&None), None);
     }
 
     #[test]
@@ -650,7 +655,7 @@ mod tests {
 
     #[test]
     fn receiver_is_range_none() {
-        assert!(!receiver_is_range(&None));
+        assert!(receiver_range(&None).is_none());
     }
 
     #[test]
@@ -686,32 +691,32 @@ mod tests {
     }
 
     #[test]
-    fn block_arg_names_multiple() {
+    fn sole_block_arg_multiple() {
         assert_eq!(
-            first_block_arg_names(b"arr.each_with_object([]) { |x, acc| x }").len(),
-            2
+            first_block_arg(b"arr.each_with_object([]) { |x, acc| x }"),
+            None
         );
     }
 
     #[test]
-    fn block_arg_names_numbered_params() {
+    fn sole_block_arg_numbered_params() {
         // Numbered parameters (_1) produce NumberedParametersNode, not BlockParametersNode
-        assert!(first_block_arg_names(b"arr.map { _1.to_s }").is_empty());
+        assert_eq!(first_block_arg(b"arr.map { _1.to_s }"), None);
     }
 
     #[test]
     fn receiver_is_range_unparenthesized() {
-        assert!(receiver_is_range(&Some(parse_first_stmt(b"1..10"))));
+        assert!(receiver_range(&Some(parse_first_stmt(b"1..10"))).is_some());
     }
 
     #[test]
     fn receiver_is_range_non_range_non_paren() {
-        assert!(!receiver_is_range(&Some(parse_first_stmt(b"42"))));
+        assert!(receiver_range(&Some(parse_first_stmt(b"42"))).is_none());
     }
 
     #[test]
     fn receiver_is_range_empty_parentheses() {
-        assert!(!receiver_is_range(&Some(parse_first_stmt(b"()"))));
+        assert!(receiver_range(&Some(parse_first_stmt(b"()"))).is_none());
     }
 
     #[test]

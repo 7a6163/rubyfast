@@ -27,10 +27,11 @@ impl TraversalResult {
 /// Find all .rb files, filter by config, and analyze them in parallel.
 pub fn traverse_and_analyze(path: &Path, config: &Config) -> TraversalResult {
     let files = collect_ruby_files(path);
-    let excluded = collect_excluded_files(&config.exclude_patterns, path);
+    let exclude_root = config.exclude_root.as_deref().unwrap_or(path);
+    let excludes = Excludes::new(&config.exclude_patterns, exclude_root);
     let scannable: Vec<PathBuf> = files
         .into_iter()
-        .filter(|f| !is_excluded(f, &excluded))
+        .filter(|f| !excludes.contains(f))
         .collect();
 
     let files_inspected = scannable.len();
@@ -76,34 +77,56 @@ fn collect_ruby_files(path: &Path) -> Vec<PathBuf> {
         .unwrap_or_default()
 }
 
-/// Expand exclude patterns relative to a base path, pre-canonicalizing results.
-fn collect_excluded_files(patterns: &[String], base: &Path) -> HashSet<PathBuf> {
-    patterns
-        .iter()
-        .flat_map(|pattern| {
-            let full_pattern = if Path::new(pattern).is_absolute() {
-                pattern.clone()
-            } else {
-                format!("{}/{}", base.display(), pattern)
-            };
-            match glob::glob(&full_pattern) {
-                Ok(paths) => paths
-                    .filter_map(|entry| entry.ok())
-                    .map(|p| p.canonicalize().unwrap_or(p))
-                    .collect::<Vec<_>>(),
-                Err(e) => {
-                    eprintln!("Warning: invalid exclude pattern '{}': {}", full_pattern, e);
-                    vec![]
-                }
-            }
-        })
-        .collect()
+/// Compiled `exclude_paths`.
+///
+/// Relative patterns are matched against each file's path relative to `root`, not expanded
+/// on disk: on Windows the canonical root is a `\\?\C:\...` verbatim path that glob can't
+/// expand. Absolute patterns are expanded on disk as written.
+struct Excludes {
+    root: PathBuf,
+    relative: Vec<glob::Pattern>,
+    absolute: HashSet<PathBuf>,
 }
 
-/// Check if a file should be excluded.
-fn is_excluded(file: &Path, excluded: &HashSet<PathBuf>) -> bool {
-    let file_canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    excluded.contains(&file_canonical)
+impl Excludes {
+    fn new(patterns: &[String], root: &Path) -> Self {
+        let mut relative = Vec::new();
+        let mut absolute = HashSet::new();
+        for pattern in patterns {
+            let parsed = if Path::new(pattern).is_absolute() {
+                glob::glob(pattern).map(|paths| {
+                    absolute.extend(paths.filter_map(Result::ok).map(|p| canonical(&p)));
+                })
+            } else {
+                glob::Pattern::new(pattern).map(|p| relative.push(p))
+            };
+            if let Err(e) = parsed {
+                eprintln!("Warning: invalid exclude pattern '{}': {}", pattern, e);
+            }
+        }
+        Self {
+            root: canonical(root),
+            relative,
+            absolute,
+        }
+    }
+
+    fn contains(&self, file: &Path) -> bool {
+        // `*` stays within one path component, as it does when globbing.
+        let opts = glob::MatchOptions {
+            require_literal_separator: true,
+            ..Default::default()
+        };
+        let file = canonical(file);
+        self.absolute.contains(&file)
+            || file
+                .strip_prefix(&self.root)
+                .is_ok_and(|rel| self.relative.iter().any(|p| p.matches_path_with(rel, opts)))
+    }
+}
+
+fn canonical(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(test)]
@@ -186,47 +209,77 @@ mod tests {
         assert!(files.is_empty());
     }
 
-    #[test]
-    fn is_excluded_matching() {
+    /// A tempdir holding `top.rb` and `vendor/lib/v.rb`.
+    fn tree() -> TempDir {
         let dir = TempDir::new().unwrap();
-        let file = dir.path().join("test.rb");
-        fs::write(&file, "x = 1").unwrap();
-        let canonical = file.canonicalize().unwrap();
-        let excluded: HashSet<PathBuf> = [canonical].into_iter().collect();
-        assert!(is_excluded(&file, &excluded));
+        fs::create_dir_all(dir.path().join("vendor/lib")).unwrap();
+        fs::write(dir.path().join("top.rb"), "x").unwrap();
+        fs::write(dir.path().join("vendor/lib/v.rb"), "x").unwrap();
+        dir
+    }
+
+    fn excluded(patterns: &[&str], root: &Path, file: &Path) -> bool {
+        let patterns: Vec<String> = patterns.iter().map(|p| p.to_string()).collect();
+        Excludes::new(&patterns, root).contains(file)
     }
 
     #[test]
-    fn is_excluded_not_matching() {
-        let dir = TempDir::new().unwrap();
-        let file = dir.path().join("test.rb");
-        fs::write(&file, "x = 1").unwrap();
-        let excluded: HashSet<PathBuf> = HashSet::new();
-        assert!(!is_excluded(&file, &excluded));
+    fn relative_pattern_matches_under_the_root() {
+        let dir = tree();
+        let v = dir.path().join("vendor/lib/v.rb");
+        assert!(excluded(&["vendor/**/*.rb"], dir.path(), &v));
+        assert!(excluded(&["vendor/lib/v.rb"], dir.path(), &v));
+        assert!(!excluded(
+            &["vendor/**/*.rb"],
+            dir.path(),
+            &dir.path().join("top.rb")
+        ));
+        // Resolved against the root, not the file's own directory.
+        assert!(!excluded(&["v.rb"], dir.path(), &v));
     }
 
     #[test]
-    fn collect_excluded_files_with_pattern() {
-        let dir = TempDir::new().unwrap();
-        fs::write(dir.path().join("vendor.rb"), "x").unwrap();
-        let patterns = vec![format!("{}/*.rb", dir.path().display())];
-        let excluded = collect_excluded_files(&patterns, dir.path());
-        assert!(!excluded.is_empty());
+    fn star_does_not_cross_directories() {
+        let dir = tree();
+        let v = dir.path().join("vendor/lib/v.rb");
+        assert!(!excluded(&["*.rb"], dir.path(), &v));
+        assert!(!excluded(&["vendor/*.rb"], dir.path(), &v));
+        assert!(excluded(&["*.rb"], dir.path(), &dir.path().join("top.rb")));
     }
 
     #[test]
-    fn collect_excluded_files_relative_pattern() {
-        let dir = TempDir::new().unwrap();
-        fs::write(dir.path().join("skip.rb"), "x").unwrap();
-        let patterns = vec!["*.rb".to_string()];
-        let excluded = collect_excluded_files(&patterns, dir.path());
-        assert!(!excluded.is_empty());
+    fn file_outside_the_root_is_not_excluded() {
+        let dir = tree();
+        let root = dir.path().join("vendor");
+        assert!(!excluded(&["**/*.rb"], &root, &dir.path().join("top.rb")));
     }
 
     #[test]
-    fn collect_excluded_files_invalid_pattern() {
-        let excluded = collect_excluded_files(&["[invalid".to_string()], Path::new("."));
-        assert!(excluded.is_empty());
+    fn absolute_pattern_is_expanded_on_disk() {
+        let dir = tree();
+        let pattern = format!(
+            "{}/*.rb",
+            glob::Pattern::escape(&dir.path().display().to_string())
+        );
+        let other = TempDir::new().unwrap();
+        assert!(excluded(
+            &[&pattern],
+            other.path(),
+            &dir.path().join("top.rb")
+        ));
+        assert!(!excluded(
+            &[&pattern],
+            other.path(),
+            &dir.path().join("vendor/lib/v.rb")
+        ));
+    }
+
+    #[test]
+    fn invalid_patterns_are_skipped() {
+        let dir = tree();
+        let invalid_abs = format!("{}/[", dir.path().display());
+        let e = Excludes::new(&["[invalid".to_string(), invalid_abs], dir.path());
+        assert!(e.relative.is_empty() && e.absolute.is_empty());
     }
 
     #[test]

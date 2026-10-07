@@ -20,13 +20,20 @@ struct RawConfig {
 pub struct Config {
     disabled_offenses: HashSet<OffenseKind>,
     pub exclude_patterns: Vec<String>,
+    /// Directory relative `exclude_patterns` are resolved against: the one holding the
+    /// config file. None when the config didn't come from a file.
+    pub exclude_root: Option<PathBuf>,
 }
 
 impl Config {
     /// Load config by searching for `.rubyfast.yml` / `.fasterer.yml` starting from `start_dir` and walking up.
     /// Returns default config if no file is found.
     pub fn load(start_dir: &Path) -> Result<Self> {
-        match find_config_file(start_dir) {
+        // Absolute, so walking up from a relative dir like `vendor` or `..` reaches the root.
+        let start_dir = start_dir
+            .canonicalize()
+            .unwrap_or_else(|_| start_dir.to_path_buf());
+        match find_config_file(&start_dir) {
             Some(path) => Self::from_file(&path),
             None => Ok(Self::default()),
         }
@@ -35,7 +42,10 @@ impl Config {
     /// Parse a specific config file.
     pub fn from_file(path: &Path) -> Result<Self> {
         let contents = std::fs::read_to_string(path)?;
-        Self::parse_yaml(&contents)
+        Ok(Self {
+            exclude_root: path.parent().map(Path::to_path_buf),
+            ..Self::parse_yaml(&contents)?
+        })
     }
 
     /// Parse config from a YAML string.
@@ -52,6 +62,7 @@ impl Config {
         Ok(Self {
             disabled_offenses,
             exclude_patterns: raw.exclude_paths,
+            exclude_root: None,
         })
     }
 
@@ -105,6 +116,20 @@ mod tests {
         let config = Config::parse_yaml(yaml).unwrap();
         assert!(!config.is_enabled(OffenseKind::ForLoopVsEach));
         assert!(config.is_enabled(OffenseKind::ShuffleFirstVsSample));
+    }
+
+    #[test]
+    fn exclude_root_is_the_config_files_directory() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let sub = dir.path().join("a/b");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(dir.path().join(".rubyfast.yml"), "exclude_paths: ['x']\n").unwrap();
+        let config = Config::load(&sub).unwrap();
+        assert_eq!(
+            config.exclude_root.unwrap().canonicalize().unwrap(),
+            dir.path().canonicalize().unwrap()
+        );
+        assert_eq!(Config::parse_yaml("{}").unwrap().exclude_root, None);
     }
 
     #[test]
