@@ -45,7 +45,7 @@ fn format_results_by_file(result: &TraversalResult) -> String {
         }
         out.push_str(&format!("{}\n", analysis.path.bold()));
         for offense in &analysis.offenses {
-            let fixable_tag = if offense.kind.is_fixable() {
+            let fixable_tag = if offense.fix.is_some() {
                 format!(" {}", "(fixable)".green())
             } else {
                 String::new()
@@ -184,7 +184,7 @@ fn format_statistics(result: &TraversalResult) -> String {
         .results
         .iter()
         .flat_map(|r| &r.offenses)
-        .filter(|o| o.kind.is_fixable())
+        .filter(|o| o.fix.is_some())
         .count();
 
     let fixable_hint = if fixable > 0 {
@@ -492,6 +492,14 @@ mod tests {
             1,
         )]));
         assert!(!out.contains("autocorrectable"));
+    }
+
+    #[test]
+    fn fixable_kind_without_a_fix_is_not_reported_as_fixable() {
+        // e.g. a for loop whose locals escape: the rule can fix, this offense can't.
+        let result = make_result(vec![Offense::new(OffenseKind::ForLoopVsEach, 1)]);
+        assert!(!format_results_by_file(&result).contains("(fixable)"));
+        assert!(!format_statistics(&result).contains("autocorrectable"));
     }
 
     #[test]
