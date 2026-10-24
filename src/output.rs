@@ -124,9 +124,9 @@ fn format_results_plain(result: &TraversalResult) -> String {
 
 fn format_parse_errors(errors: &[ParseError]) -> String {
     let mut out = String::from(
-        "rubyfast was unable to process some files because the\n\
-         internal parser is not able to read some characters or\n\
-         has timed out. Unprocessable files were:\n\
+        "rubyfast was unable to process some files because they\n\
+         could not be read or contain syntax errors.\n\
+         Unprocessable files were:\n\
          -----------------------------------------------------\n",
     );
     for err in errors {
@@ -288,6 +288,10 @@ fn format_fix_statistics(
     total_errors: usize,
 ) -> String {
     let stats = StatsParts::build(result);
+    let offenses_part = match &stats.parse_errors_str {
+        Some(errors_str) => format!("{}, {}", stats.colored_offenses, errors_str),
+        None => stats.colored_offenses.clone(),
+    };
     let offenses = result.total_offenses();
     let fixable: usize = result
         .results
@@ -317,7 +321,7 @@ fn format_fix_statistics(
         format!(
             "{}, {}, {}, {}\n",
             stats.files_str.green(),
-            stats.colored_offenses,
+            offenses_part,
             colored_fixed,
             err_str.yellow()
         )
@@ -330,7 +334,7 @@ fn format_fix_statistics(
         format!(
             "{}, {}, {}, {}\n",
             stats.files_str.green(),
-            stats.colored_offenses,
+            offenses_part,
             colored_fixed,
             unfixable_str.yellow()
         )
@@ -338,7 +342,7 @@ fn format_fix_statistics(
         format!(
             "{}, {}, {}\n",
             stats.files_str.green(),
-            stats.colored_offenses,
+            offenses_part,
             colored_fixed
         )
     }
@@ -521,6 +525,12 @@ mod tests {
         assert!(out.contains("1 offense fixed"));
         assert!(out.contains("1 offense cannot be auto-fixed"));
         assert!(!out.contains("skipped"));
+    }
+
+    #[test]
+    fn fix_statistics_reports_unparsable_files() {
+        let result = make_result_with_parse_errors(vec![], vec![parse_error()]);
+        assert!(format_fix_statistics(&result, 0, 0).contains("1 unparsable file found"));
     }
 
     #[test]

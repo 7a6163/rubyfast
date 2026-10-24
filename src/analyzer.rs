@@ -36,15 +36,13 @@ pub fn analyze_file(path: &Path, config: &Config) -> Result<AnalysisResult, Pars
 
     let result = ruby_prism::parse(&source);
 
-    // Check for parse errors
-    let has_errors = result.errors().next().is_some();
-
-    if has_errors {
-        // Prism always produces an AST, but if there are errors, skip analysis
-        // to avoid false positives (matching lib-ruby-parser behavior).
-        return Ok(AnalysisResult {
+    // Prism always produces an AST, but analyzing a broken one gives false positives, and
+    // reporting the file as clean would let a syntax error pass CI unnoticed.
+    if let Some(error) = result.errors().next() {
+        let line = byte_offset_to_line(&newline_positions, error.location().start_offset());
+        return Err(ParseError {
             path: path.display().to_string(),
-            offenses: vec![],
+            message: format!("syntax error on line {}: {}", line, error.message()),
         });
     }
 
@@ -231,13 +229,17 @@ mod tests {
     }
 
     #[test]
-    fn analyze_file_with_parse_errors_returns_empty() {
+    fn analyze_file_with_parse_errors_reports_the_first_one() {
         let dir = tempfile::TempDir::new().unwrap();
         let file = dir.path().join("fatal.rb");
-        std::fs::write(&file, "def def def").unwrap();
+        std::fs::write(&file, "x = 1\ndef def def").unwrap();
         let config = crate::config::Config::default();
-        let result = super::analyze_file(&file, &config).unwrap();
-        assert!(result.offenses.is_empty());
+        let err = super::analyze_file(&file, &config).unwrap_err();
+        assert!(
+            err.message.starts_with("syntax error on line 2: "),
+            "{}",
+            err.message
+        );
     }
 
     #[test]

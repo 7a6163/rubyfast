@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- A file with a syntax error is reported as unparsable, with the line and parser message,
+  and fails the run. It used to be skipped silently and counted as clean, so a broken
+  file passed CI. Files that can't be read now fail the run too
+
 ## [2.1.0] - 2026-10-24
 
 ### Changed

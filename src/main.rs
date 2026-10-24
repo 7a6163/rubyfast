@@ -80,6 +80,11 @@ fn main() {
         print_results(&result, &cli.format);
     }
 
+    // A file that couldn't be read or parsed wasn't linted, so the run can't pass.
+    if !result.parse_errors.is_empty() {
+        process::exit(1);
+    }
+
     if cli.fix {
         // In fix mode, only exit 1 if offenses remain (unfixable, or whose fix didn't apply)
         let unfixable = result
