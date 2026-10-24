@@ -1,6 +1,6 @@
 [package]
 name = "rubyfast"
-version = "2.1.0"
+version = "2.1.1"
 edition = "2024"
 description = "An ultra-fast Ruby performance linter rewritten in Rust — detects 19 common anti-patterns"
 license = "MIT"
