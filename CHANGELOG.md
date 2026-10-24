@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `--fix` writes each file via a temp file and rename, so an interrupted run can't leave
+  it half-written. Symlinks, permissions and read-only files are respected
+- An unknown `speedups` key in the config prints a warning instead of being ignored
+
 ### Fixed
 
 - `--fix` no longer changes program behavior:

@@ -169,6 +169,27 @@ fn config_disables_rule() {
 }
 
 #[test]
+fn config_warns_about_unknown_speedups() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("test.rb"), "for x in [1]; end\n").unwrap();
+    std::fs::write(
+        dir.path().join(".rubyfast.yml"),
+        "speedups:\n  for_loop_vs_eahc: false\n  for_loop_vs_each: true\n",
+    )
+    .unwrap();
+    let output = cargo_bin()
+        .arg(dir.path().to_str().unwrap())
+        .output()
+        .expect("Failed to run");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unknown speedup 'for_loop_vs_eahc'"),
+        "stderr: {stderr}"
+    );
+    assert!(!stderr.contains("'for_loop_vs_each'"), "stderr: {stderr}");
+}
+
+#[test]
 fn invalid_config_exits_with_error() {
     let dir = tempfile::TempDir::new().unwrap();
     std::fs::write(
