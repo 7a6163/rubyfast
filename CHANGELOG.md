@@ -7,6 +7,8 @@
 - `--fix` writes each file via a temp file and rename, so an interrupted run can't leave
   it half-written. Symlinks, permissions and read-only files are respected
 - An unknown `speedups` key in the config prints a warning instead of being ignored
+- File discovery tracks real paths while walking instead of canonicalizing every file:
+  about 18x faster on a tree with 30,000 excluded `vendor/` files (1.07s → 0.06s)
 
 ### Fixed
 

@@ -31,7 +31,8 @@ pub fn traverse_and_analyze(path: &Path, config: &Config) -> TraversalResult {
     let excludes = Excludes::new(&config.exclude_patterns, exclude_root);
     let scannable: Vec<PathBuf> = files
         .into_iter()
-        .filter(|f| !excludes.contains(f))
+        .filter(|(_, real)| !excludes.contains(real))
+        .map(|(path, _)| path)
         .collect();
 
     let files_inspected = scannable.len();
@@ -62,26 +63,63 @@ pub fn traverse_and_analyze(path: &Path, config: &Config) -> TraversalResult {
     }
 }
 
-/// Collect all .rb files under a path.
-fn collect_ruby_files(path: &Path) -> Vec<PathBuf> {
+/// Collect all .rb files under a path, each paired with its real (symlink-free) path.
+///
+/// Real paths are built up during the walk rather than by canonicalizing every file: that
+/// costs a syscall per path component and dominated runtime on trees with a large
+/// excluded `vendor/`.
+fn collect_ruby_files(path: &Path) -> Vec<(PathBuf, PathBuf)> {
     if path.is_file() {
-        return vec![path.to_path_buf()];
+        return vec![(path.to_path_buf(), canonical(path))];
     }
+    let mut walk = Walk::default();
+    walk.dir(path, &canonical(path));
+    walk.files
+}
 
-    // Escape glob metacharacters in the base path to avoid pattern errors
-    let escaped = glob::Pattern::escape(&path.display().to_string());
-    let pattern = format!("{}/**/*.rb", escaped);
-    // Symlinks can reach one file by several paths; keep the first so it's fixed only once.
-    let mut seen = HashSet::new();
-    // The pattern is escaped above, so it can never be invalid.
-    glob::glob(&pattern)
-        .map(|paths| {
-            paths
-                .filter_map(|entry| entry.ok())
-                .filter(|p| seen.insert(canonical(p)))
-                .collect()
-        })
-        .unwrap_or_default()
+/// Recursive `.rb` file search that follows symlinks but reaches each real file and
+/// directory only once, so a file is never fixed twice and symlink loops end.
+#[derive(Default)]
+struct Walk {
+    files: Vec<(PathBuf, PathBuf)>,
+    seen: HashSet<PathBuf>,
+}
+
+impl Walk {
+    fn dir(&mut self, dir: &Path, real_dir: &Path) {
+        if !self.seen.insert(real_dir.to_path_buf()) {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
+        entries.sort_by_key(|e| e.file_name());
+        for entry in entries {
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            let path = entry.path();
+            let (real, is_dir) = if file_type.is_symlink() {
+                match path.canonicalize() {
+                    Ok(real) => {
+                        let is_dir = real.is_dir();
+                        (real, is_dir)
+                    }
+                    // Dangling: keep it so a `.rb` link is reported as unreadable.
+                    Err(_) => (path.clone(), false),
+                }
+            } else {
+                (real_dir.join(entry.file_name()), file_type.is_dir())
+            };
+            if is_dir {
+                self.dir(&path, &real);
+            } else if path.extension().is_some_and(|e| e == "rb") && self.seen.insert(real.clone())
+            {
+                self.files.push((path, real));
+            }
+        }
+    }
 }
 
 /// Compiled `exclude_paths`.
@@ -118,14 +156,14 @@ impl Excludes {
         }
     }
 
+    /// `file` must be a real path, as `collect_ruby_files` returns.
     fn contains(&self, file: &Path) -> bool {
         // `*` stays within one path component, as it does when globbing.
         let opts = glob::MatchOptions {
             require_literal_separator: true,
             ..Default::default()
         };
-        let file = canonical(file);
-        self.absolute.contains(&file)
+        self.absolute.contains(file)
             || file
                 .strip_prefix(&self.root)
                 .is_ok_and(|rel| self.relative.iter().any(|p| p.matches_path_with(rel, opts)))
@@ -208,6 +246,20 @@ mod tests {
         assert_eq!(files.len(), 1);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn collect_ruby_files_reaches_each_real_file_once() {
+        let dir = TempDir::new().unwrap();
+        let sub = dir.path().join("sub");
+        fs::create_dir(&sub).unwrap();
+        fs::write(sub.join("a.rb"), "x").unwrap();
+        std::os::unix::fs::symlink("a.rb", sub.join("b.rb")).unwrap();
+        std::os::unix::fs::symlink("..", sub.join("loop")).unwrap();
+        let files = collect_ruby_files(dir.path());
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].1, canonical(&sub.join("a.rb")));
+    }
+
     #[test]
     fn collect_ruby_files_no_rb() {
         let dir = TempDir::new().unwrap();
@@ -227,7 +279,7 @@ mod tests {
 
     fn excluded(patterns: &[&str], root: &Path, file: &Path) -> bool {
         let patterns: Vec<String> = patterns.iter().map(|p| p.to_string()).collect();
-        Excludes::new(&patterns, root).contains(file)
+        Excludes::new(&patterns, root).contains(&canonical(file))
     }
 
     #[test]
