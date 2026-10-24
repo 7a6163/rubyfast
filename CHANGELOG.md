@@ -1,5 +1,32 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- `--fix` writes each file via a temp file and rename, so an interrupted run can't leave
+  it half-written. Symlinks, permissions and read-only files are respected
+- An unknown `speedups` key in the config prints a warning instead of being ignored
+- File discovery tracks real paths while walking instead of canonicalizing every file:
+  about 18x faster on a tree with 30,000 excluded `vendor/` files (1.07s → 0.06s)
+
+### Fixed
+
+- `--fix` no longer changes program behavior:
+  - `shuffle_first_vs_sample` and `reverse_each_vs_reverse_each` keep safe navigation
+    (`x&.shuffle&.first` → `x&.sample`, not `x.sample`)
+  - `shuffle_first_vs_sample` is only fixed without arguments; `shuffle.first(2)` and
+    `shuffle(random: r).first` used to lose them
+  - `keys_each_vs_each_key` is no longer auto-fixed: `each_key` raises if the block adds
+    a key, and non-Hash receivers with a `keys` method may have no `each_key`
+- A file reachable through several symlinked paths is scanned and fixed once, instead
+  of being fixed again with stale offsets
+- `getter_vs_attr_reader` and `setter_vs_attr_writer` no longer fire on methods with
+  optional, splat, keyword or block parameters, which `attr_reader`/`attr_writer` can't
+  replace
+- `(fixable)` and the "autocorrectable" count only include offenses `--fix` will actually
+  fix, not every offense of a fixable rule (e.g. a `for` loop whose locals escape)
+
 ## [2.0.0] - 2026-10-07
 
 Major because public library items were removed or changed (see **Breaking**). The CLI

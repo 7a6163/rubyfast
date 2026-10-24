@@ -53,6 +53,17 @@ impl Config {
         let raw: Option<RawConfig> = serde_saphyr::from_str(yaml)?;
         let raw = raw.unwrap_or_default();
 
+        // A misspelled key would otherwise leave its rule silently enabled.
+        let mut unknown: Vec<&String> = raw
+            .speedups
+            .keys()
+            .filter(|k| OffenseKind::from_config_key(k).is_none())
+            .collect();
+        unknown.sort();
+        for key in unknown {
+            eprintln!("Warning: unknown speedup '{}' in config", key);
+        }
+
         let disabled_offenses = OffenseKind::all()
             .iter()
             .filter(|kind| raw.speedups.get(kind.config_key()) == Some(&false))

@@ -106,10 +106,32 @@ pub fn apply_fixes_to_file(path: &Path, fixes: &[Fix]) -> Result<Vec<bool>, Stri
         ));
     }
 
-    std::fs::write(path, &fixed)
+    write_atomically(path, &fixed)
         .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
 
     Ok(applied)
+}
+
+/// Replace a file's contents without ever leaving it half-written: write a sibling temp
+/// file, then rename it over the original. Symlinks are resolved first so the link stays a
+/// link; a hard-linked file is split off from its other names.
+fn write_atomically(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    let target = path.canonicalize()?;
+    // Opening for write fails on a read-only file, which a rename alone would replace.
+    let perms = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&target)?
+        .metadata()?
+        .permissions();
+    let name = target.file_name().unwrap_or_default().to_string_lossy();
+    let tmp = target.with_file_name(format!(".{}.rubyfast-{}", name, std::process::id()));
+    let result = std::fs::write(&tmp, contents)
+        .and_then(|()| std::fs::set_permissions(&tmp, perms))
+        .and_then(|()| std::fs::rename(&tmp, &target));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
 }
 
 #[cfg(test)]
@@ -274,6 +296,60 @@ mod tests {
         let fix = Fix::single(0, 14, "[1].each do |x|;");
         let result = apply_fixes_to_file(&file, &[fix]).unwrap();
         assert_eq!(result, [true]);
+    }
+
+    #[test]
+    fn apply_fixes_to_file_writes_content_and_leaves_no_temp_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("test.rb");
+        std::fs::write(&file, "x = [1].shuffle.first").unwrap();
+        apply_fixes_to_file(&file, &[Fix::single(7, 21, ".sample")]).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "x = [1].sample");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn apply_fixes_to_file_keeps_symlink_and_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::TempDir::new().unwrap();
+        let real = dir.path().join("real.rb");
+        let link = dir.path().join("link.rb");
+        std::fs::write(&real, "x = [1].shuffle.first").unwrap();
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o640)).unwrap();
+        std::os::unix::fs::symlink("real.rb", &link).unwrap();
+
+        apply_fixes_to_file(&link, &[Fix::single(7, 21, ".sample")]).unwrap();
+
+        assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read_to_string(&real).unwrap(), "x = [1].sample");
+        let mode = std::fs::metadata(&real).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o640);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn apply_fixes_to_file_in_read_only_dir_keeps_the_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("test.rb");
+        std::fs::write(&file, "x = [1].shuffle.first").unwrap();
+        let set_mode = |mode| {
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(mode)).unwrap()
+        };
+        set_mode(0o555);
+        let result = apply_fixes_to_file(&file, &[Fix::single(7, 21, ".sample")]);
+        set_mode(0o755);
+
+        // Root ignores directory permissions, so there the write succeeds instead. Either way
+        // no temp file is left behind.
+        let expected = if result.is_ok() {
+            "x = [1].sample"
+        } else {
+            "x = [1].shuffle.first"
+        };
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), expected);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 
     #[test]

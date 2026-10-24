@@ -169,6 +169,27 @@ fn config_disables_rule() {
 }
 
 #[test]
+fn config_warns_about_unknown_speedups() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("test.rb"), "for x in [1]; end\n").unwrap();
+    std::fs::write(
+        dir.path().join(".rubyfast.yml"),
+        "speedups:\n  for_loop_vs_eahc: false\n  for_loop_vs_each: true\n",
+    )
+    .unwrap();
+    let output = cargo_bin()
+        .arg(dir.path().to_str().unwrap())
+        .output()
+        .expect("Failed to run");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unknown speedup 'for_loop_vs_eahc'"),
+        "stderr: {stderr}"
+    );
+    assert!(!stderr.contains("'for_loop_vs_each'"), "stderr: {stderr}");
+}
+
+#[test]
 fn invalid_config_exits_with_error() {
     let dir = tempfile::TempDir::new().unwrap();
     std::fs::write(
@@ -269,6 +290,49 @@ fn fix_mode_keeps_for_loop_whose_locals_escape() {
     let (code, stdout, content) = run_fix(src);
     assert_eq!(code, Some(1), "stdout: {}", stdout);
     assert_eq!(content, src);
+}
+
+#[test]
+fn fix_mode_keeps_safe_navigation() {
+    let (code, stdout, content) = run_fix("x&.shuffle&.first\nx&.reverse&.each { |i| i }\n");
+    assert_eq!(code, Some(0), "stdout: {}", stdout);
+    assert_eq!(content, "x&.sample\nx&.reverse_each { |i| i }\n");
+}
+
+#[test]
+fn fix_mode_keeps_shuffle_first_with_arguments() {
+    let src = "a.shuffle.first(2)\na.shuffle(random: r).first\n";
+    let (code, stdout, content) = run_fix(src);
+    assert_eq!(code, Some(1), "stdout: {}", stdout);
+    assert_eq!(content, src);
+}
+
+#[test]
+fn fix_mode_keeps_keys_each() {
+    let src = "h.keys.each { |k| h[k.to_s] = 1 }\n";
+    let (code, stdout, content) = run_fix(src);
+    assert_eq!(code, Some(1), "stdout: {}", stdout);
+    assert_eq!(content, src);
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinked_file_is_scanned_once() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir(dir.path().join("lib")).unwrap();
+    std::fs::write(dir.path().join("lib/a.rb"), "a.shuffle.first\n").unwrap();
+    std::os::unix::fs::symlink("lib", dir.path().join("alias")).unwrap();
+    let output = cargo_bin()
+        .args([dir.path().to_str().unwrap(), "--fix"])
+        .output()
+        .expect("Failed to run");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(0), "stdout: {stdout}");
+    assert!(stdout.contains("1 file inspected"), "stdout: {stdout}");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("lib/a.rb")).unwrap(),
+        "a.sample\n"
+    );
 }
 
 #[test]

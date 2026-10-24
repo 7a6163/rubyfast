@@ -97,14 +97,13 @@ app/controllers/api/v1/health_articles_controller.rb:11 Hash#fetch with second a
 
 ## Auto-fix
 
-`rubyfast --fix` automatically corrects 8 safe offenses in-place:
+`rubyfast --fix` automatically corrects 7 safe offenses in-place:
 
 | # | Pattern | Fix |
 |---|---------|-----|
 | 1 | `.shuffle.first` | `.sample` |
 | 2 | `.select{}.first` | `.detect{}` |
 | 4 | `.reverse.each` | `.reverse_each` |
-| 5 | `.keys.each` | `.each_key` |
 | 6 | `.map{}.flatten(1)` | `.flat_map{}` |
 | 7 | `.gsub("x","y")` | `.tr("x","y")` |
 | 13 | `(1..10).include?` | `.cover?` |
@@ -120,7 +119,7 @@ Fixes are applied in reverse byte order with syntax verification — if a fix wo
 | 2 | `.select{}.first` | `.detect{}` | Yes |
 | 3 | `.select{}.last` | `.reverse.detect{}` | No |
 | 4 | `.reverse.each` | `.reverse_each` | Yes |
-| 5 | `.keys.each` | `.each_key` | Yes |
+| 5 | `.keys.each` | `.each_key` | No |
 | 6 | `.map{}.flatten(1)` | `.flat_map{}` | Yes |
 | 7 | `.gsub("x","y")` (single chars) | `.tr("x","y")` | Yes |
 | 8 | `.sort { \|a,b\| ... }` | `.sort_by` | No |
@@ -176,6 +175,15 @@ code # rubyfast:disable shuffle_first_vs_sample, for_loop_vs_each
 
 # Backwards compatible with fasterer
 code # fasterer:disable shuffle_first_vs_sample
+```
+
+An offense is reported on the line where its expression starts, so for a chain split over
+several lines, put the comment on that first line or use `disable-next-line` above it:
+
+```ruby
+x = arr # rubyfast:disable shuffle_first_vs_sample
+  .shuffle
+  .first
 ```
 
 ## Configuration

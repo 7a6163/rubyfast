@@ -120,6 +120,11 @@ pub fn scan_call_on_block_call(
 
 // --- Individual offense checks ---
 
+/// The call operator as written (`.`, `&.` or `::`), so a fix keeps safe navigation.
+fn operator_text(loc: &ruby_prism::Location<'_>) -> String {
+    String::from_utf8_lossy(loc.as_slice()).into_owned()
+}
+
 /// `.shuffle.first` → `.sample`
 fn check_shuffle_first(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offense>) {
     if call.name().as_slice() != b"first"
@@ -127,13 +132,15 @@ fn check_shuffle_first(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offen
     {
         return;
     }
+    // Arguments (`first(2)`, `shuffle(random: r)`) would be dropped, so they get no fix.
     let fix = receiver_as_call(&call.receiver())
+        .filter(|rs| arg_count(rs) == 0 && arg_count(call) == 0)
         .and_then(|rs| rs.call_operator_loc())
         .map(|dot_l| {
             Fix::single(
                 dot_l.start_offset(),
                 call.location().end_offset(),
-                ".sample",
+                format!("{}sample", operator_text(&dot_l)),
             )
         });
     offenses.push(Offense::with_optional_fix(
@@ -151,10 +158,15 @@ fn check_reverse_each(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offens
         return;
     }
     let fix = receiver_as_call(&call.receiver())
+        .filter(|rs| arg_count(rs) == 0)
         .and_then(|rs| rs.call_operator_loc())
         .zip(call.message_loc())
         .map(|(dot_l, sel_l)| {
-            Fix::single(dot_l.start_offset(), sel_l.end_offset(), ".reverse_each")
+            Fix::single(
+                dot_l.start_offset(),
+                sel_l.end_offset(),
+                format!("{}reverse_each", operator_text(&dot_l)),
+            )
         });
     offenses.push(Offense::with_optional_fix(
         OffenseKind::ReverseEachVsReverseEach,
@@ -172,16 +184,11 @@ fn check_keys_each(call: &ruby_prism::CallNode<'_>, offenses: &mut Vec<Offense>)
         && recv_call.name().as_slice() == b"keys"
         && arg_count(&recv_call) == 0
     {
-        let fix = recv_call
-            .call_operator_loc()
-            .zip(call.message_loc())
-            .map(|(dot_l, sel_l)| {
-                Fix::single(dot_l.start_offset(), sel_l.end_offset(), ".each_key")
-            });
-        offenses.push(Offense::with_optional_fix(
+        // No fix: `each_key` raises if the block adds a key, and non-Hash receivers with a
+        // `keys` method (e.g. Redis) have no `each_key`.
+        offenses.push(Offense::new(
             OffenseKind::KeysEachVsEachKey,
             call.location().start_offset(),
-            fix,
         ));
     }
 }
