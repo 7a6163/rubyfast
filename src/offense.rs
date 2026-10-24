@@ -92,7 +92,6 @@ impl OffenseKind {
             Self::ShuffleFirstVsSample
                 | Self::SelectFirstVsDetect
                 | Self::ReverseEachVsReverseEach
-                | Self::KeysEachVsEachKey
                 | Self::MapFlattenVsFlatMap
                 | Self::GsubVsTr
                 | Self::IncludeVsCoverOnRange
@@ -193,7 +192,7 @@ mod tests {
     }
 
     #[test]
-    fn exactly_eight_kinds_are_fixable() {
+    fn exactly_seven_kinds_are_fixable() {
         let fixable: Vec<OffenseKind> = OffenseKind::all()
             .iter()
             .copied()
@@ -205,7 +204,6 @@ mod tests {
                 OffenseKind::ShuffleFirstVsSample,
                 OffenseKind::SelectFirstVsDetect,
                 OffenseKind::ReverseEachVsReverseEach,
-                OffenseKind::KeysEachVsEachKey,
                 OffenseKind::MapFlattenVsFlatMap,
                 OffenseKind::GsubVsTr,
                 OffenseKind::IncludeVsCoverOnRange,

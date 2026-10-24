@@ -71,9 +71,16 @@ fn collect_ruby_files(path: &Path) -> Vec<PathBuf> {
     // Escape glob metacharacters in the base path to avoid pattern errors
     let escaped = glob::Pattern::escape(&path.display().to_string());
     let pattern = format!("{}/**/*.rb", escaped);
+    // Symlinks can reach one file by several paths; keep the first so it's fixed only once.
+    let mut seen = HashSet::new();
     // The pattern is escaped above, so it can never be invalid.
     glob::glob(&pattern)
-        .map(|paths| paths.filter_map(|entry| entry.ok()).collect())
+        .map(|paths| {
+            paths
+                .filter_map(|entry| entry.ok())
+                .filter(|p| seen.insert(canonical(p)))
+                .collect()
+        })
         .unwrap_or_default()
 }
 
