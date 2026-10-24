@@ -67,13 +67,13 @@ app/controllers/api/v1/health_articles_controller.rb
   L11  Hash#fetch with second argument is slower than Hash#fetch with block
 ```
 
-Offenses that support `--fix` are tagged with `(fixable)`, and the summary line shows how many can be auto-fixed:
+Offenses that `--fix` will correct are tagged with `(fixable)`, and the summary line shows how many can be auto-fixed:
 
 ```
 tests/fixtures/19_for_loop.rb
   L1  For loop is slower than using each (fixable)
 
-22 files inspected, 41 offenses detected, 21 offenses autocorrectable (run rubyfast --fix)
+23 files inspected, 43 offenses detected, 18 offenses autocorrectable (run rubyfast --fix)
 ```
 
 ### `--format rule`
@@ -115,7 +115,7 @@ Fixes are applied in reverse byte order with syntax verification — if a fix wo
 
 | # | Pattern | Suggestion | Auto-fix |
 |---|---------|------------|----------|
-| 1 | `.shuffle.first` | `.sample` | Yes |
+| 1 | `.shuffle.first` | `.sample` | Without arguments |
 | 2 | `.select{}.first` | `.detect{}` | Yes |
 | 3 | `.select{}.last` | `.reverse.detect{}` | No |
 | 4 | `.reverse.each` | `.reverse_each` | Yes |
@@ -141,7 +141,10 @@ Rule 9 only fires when the default has to be constructed (`fetch(k, [])`,
 invocation cost makes the block form the slower one there. This matches the caveat fast-ruby
 documents next to the benchmark this rule comes from.
 
-Some fixes are only applied when they can't change behavior. Rule 13 is fixed only for
+Some fixes are only applied when they can't change behavior. Rule 1 is fixed only when
+neither call takes arguments, since `shuffle.first(2)` returns an array and
+`shuffle(random: rng)` is seeded. Rule 5 is never fixed: `each_key` raises if the block
+adds a key, and receivers like Redis have `keys` but no `each_key`. Rule 13 is fixed only for
 numeric-literal ranges: on other ranges such as `('a'..'z')`, `include?` checks membership
 while `cover?` compares bounds. Rule 19 is fixed only when the loop body assigns no locals
 and the loop variable isn't used outside the loop, because a `for` loop shares the
@@ -200,7 +203,7 @@ exclude_paths:
   - tmp/**/*.rb
 ```
 
-The config file is auto-discovered by walking up from the scan directory. `.rubyfast.yml` takes precedence if both exist.
+The config file is auto-discovered by walking up from the scan directory. `.rubyfast.yml` takes precedence if both exist. An unknown key under `speedups` prints a warning, so a misspelled rule name doesn't go unnoticed.
 
 ## CI/CD Integration
 
@@ -274,7 +277,7 @@ string.
 cargo build
 cargo test
 cargo clippy -- -D warnings
-cargo llvm-cov              # line coverage (100%)
+cargo llvm-cov              # line coverage
 cargo mutants               # mutation testing
 ```
 
