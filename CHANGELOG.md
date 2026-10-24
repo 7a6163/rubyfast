@@ -8,6 +8,13 @@
   and fails the run. It used to be skipped silently and counted as clean, so a broken
   file passed CI. Files that can't be read now fail the run too
 
+### Documentation
+
+- Benchmark re-run on one machine with fastererer v1.1.0 added and the unreleased prism
+  fork dropped: rubyfast v2.1.0 takes 22.0 ms, 13x faster than fastererer and 124x faster
+  than fasterer v0.11.0. On the same machine v2.1.0 is 1.8x faster than v2.0.0, since
+  v2.0.0 canonicalized every file even with no `exclude_paths`
+
 ## [2.1.0] - 2026-10-24
 
 ### Changed
