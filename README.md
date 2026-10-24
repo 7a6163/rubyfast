@@ -67,13 +67,13 @@ app/controllers/api/v1/health_articles_controller.rb
   L11  Hash#fetch with second argument is slower than Hash#fetch with block
 ```
 
-Offenses that support `--fix` are tagged with `(fixable)`, and the summary line shows how many can be auto-fixed:
+Offenses that `--fix` will correct are tagged with `(fixable)`, and the summary line shows how many can be auto-fixed:
 
 ```
 tests/fixtures/19_for_loop.rb
   L1  For loop is slower than using each (fixable)
 
-22 files inspected, 41 offenses detected, 21 offenses autocorrectable (run rubyfast --fix)
+23 files inspected, 43 offenses detected, 18 offenses autocorrectable (run rubyfast --fix)
 ```
 
 ### `--format rule`
@@ -115,7 +115,7 @@ Fixes are applied in reverse byte order with syntax verification — if a fix wo
 
 | # | Pattern | Suggestion | Auto-fix |
 |---|---------|------------|----------|
-| 1 | `.shuffle.first` | `.sample` | Yes |
+| 1 | `.shuffle.first` | `.sample` | Without arguments |
 | 2 | `.select{}.first` | `.detect{}` | Yes |
 | 3 | `.select{}.last` | `.reverse.detect{}` | No |
 | 4 | `.reverse.each` | `.reverse_each` | Yes |
@@ -141,7 +141,10 @@ Rule 9 only fires when the default has to be constructed (`fetch(k, [])`,
 invocation cost makes the block form the slower one there. This matches the caveat fast-ruby
 documents next to the benchmark this rule comes from.
 
-Some fixes are only applied when they can't change behavior. Rule 13 is fixed only for
+Some fixes are only applied when they can't change behavior. Rule 1 is fixed only when
+neither call takes arguments, since `shuffle.first(2)` returns an array and
+`shuffle(random: rng)` is seeded. Rule 5 is never fixed: `each_key` raises if the block
+adds a key, and receivers like Redis have `keys` but no `each_key`. Rule 13 is fixed only for
 numeric-literal ranges: on other ranges such as `('a'..'z')`, `include?` checks membership
 while `cover?` compares bounds. Rule 19 is fixed only when the loop body assigns no locals
 and the loop variable isn't used outside the loop, because a `for` loop shares the
@@ -200,7 +203,7 @@ exclude_paths:
   - tmp/**/*.rb
 ```
 
-The config file is auto-discovered by walking up from the scan directory. `.rubyfast.yml` takes precedence if both exist.
+The config file is auto-discovered by walking up from the scan directory. `.rubyfast.yml` takes precedence if both exist. An unknown key under `speedups` prints a warning, so a misspelled rule name doesn't go unnoticed.
 
 ## CI/CD Integration
 
@@ -249,24 +252,24 @@ docker run --rm -v $(pwd):/workspace ghcr.io/7a6163/rubyfast:latest .
 
 ## Benchmark
 
-Compared against [fasterer](https://github.com/DamirSvrtan/fasterer) (v0.11.0, Ruby + ruby_parser) and a [prism-based fork](https://github.com/mattmenefee/fasterer/tree/native-prism-migration) (Ruby + prism, unreleased).
+Compared against [fastererer](https://github.com/ExtractableMedia/fastererer) (v1.1.0, a maintained fasterer fork on Ruby + prism) and the original [fasterer](https://github.com/DamirSvrtan/fasterer) (v0.11.0, Ruby + ruby_parser).
 
-Corpus: [rubygems.org](https://github.com/rubygems/rubygems.org) at `3c8ea0d4c` — 1,338 Ruby files. Measured with [hyperfine](https://github.com/sharkdp/hyperfine) on Apple Silicon (macOS 27, Ruby 4.0.5); each tool run from the project root, since `fasterer` only scans the current directory.
+Corpus: [rubygems.org](https://github.com/rubygems/rubygems.org) at `3c8ea0d4c` — 1,338 Ruby files. Measured with [hyperfine](https://github.com/sharkdp/hyperfine) on an Apple M5 Pro (macOS 27, Ruby 3.4.11), 10 runs after 2 warmups; each tool run from the project root, since `fasterer` only scans the current directory.
 
-| Tool | Parser | Time | Relative |
-|:---|:---|---:|---:|
-| **rubyfast v2.0.0** | Rust + ruby-prism | **57.5 ms** | **1x** |
-| fasterer (prism fork) | Ruby + prism | 464 ms | 8.1x slower |
-| fasterer v0.11.0 | Ruby + ruby_parser | 4.50 s | 78x slower |
+| Tool | Parser | Time | Memory | Relative |
+|:---|:---|---:|---:|---:|
+| **rubyfast v2.1.0** | Rust + ruby-prism | **22.0 ms** | **9.1 MiB** | **1x** |
+| fastererer v1.1.0 | Ruby + prism | 292 ms | 34.4 MiB | 13x slower |
+| fasterer v0.11.0 | Ruby + ruby_parser | 2.74 s | 47.9 MiB | 124x slower |
 
-**rubyfast is 78x faster** than the original fasterer and **8.1x faster** than the prism-based Ruby fork.
+**rubyfast is 124x faster** than the original fasterer and **13x faster** than fastererer.
 
-On this corpus rubyfast reports 33 offenses to fasterer's 74. Every rule matches
-exactly except `fetch` (15 vs 56); all 41 of the difference are cheap defaults
-(`fetch(:k, nil)`, `fetch("PORT", 3000)`, `fetch(:otp, "")` in a frozen-string-literal
-file) that fasterer reports and rubyfast deliberately does not — see rule 9 above.
-The 15 that remain all build something: `[]`, `{}`, a method call, or an interpolated
-string.
+On this corpus rubyfast reports 33 offenses to fasterer's 74 and fastererer's 75. Every
+rule matches exactly except `fetch` (15 vs 56 and 57); the whole difference is cheap
+defaults (`fetch(:k, nil)`, `fetch("PORT", 3000)`, `fetch(:otp, "")` in a
+frozen-string-literal file) that the Ruby tools report and rubyfast deliberately does not —
+see rule 9 above. The 15 that remain all build something: `[]`, `{}`, a method call, or an
+interpolated string.
 
 ## Development
 
@@ -274,7 +277,7 @@ string.
 cargo build
 cargo test
 cargo clippy -- -D warnings
-cargo llvm-cov              # line coverage (100%)
+cargo llvm-cov              # line coverage
 cargo mutants               # mutation testing
 ```
 

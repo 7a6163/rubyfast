@@ -336,6 +336,40 @@ fn symlinked_file_is_scanned_once() {
 }
 
 #[test]
+fn syntax_error_is_reported_and_fails_the_run() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("ok.rb"), "x = 1\n").unwrap();
+    std::fs::write(
+        dir.path().join("bad.rb"),
+        "def foo\n  x = [1].shuffle.first\nend\nend\n",
+    )
+    .unwrap();
+    for args in [vec![], vec!["--fix"]] {
+        let output = cargo_bin()
+            .arg(dir.path())
+            .args(&args)
+            .output()
+            .expect("Failed to run");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(output.status.code(), Some(1), "{args:?} stdout: {stdout}");
+        assert!(
+            stdout.contains("bad.rb - syntax error on line 4"),
+            "stdout: {stdout}"
+        );
+        assert!(
+            stdout.contains("1 unparsable file found"),
+            "stdout: {stdout}"
+        );
+    }
+    // The broken file isn't touched by --fix.
+    assert!(
+        std::fs::read_to_string(dir.path().join("bad.rb"))
+            .unwrap()
+            .contains("shuffle.first")
+    );
+}
+
+#[test]
 fn fix_mode_keeps_include_on_string_range() {
     let src = "('a'..'z').include?('bb')\n";
     let (code, stdout, content) = run_fix(src);
