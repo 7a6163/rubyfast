@@ -327,6 +327,31 @@ mod tests {
         assert_eq!(mode & 0o777, 0o640);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn apply_fixes_to_file_in_read_only_dir_keeps_the_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("test.rb");
+        std::fs::write(&file, "x = [1].shuffle.first").unwrap();
+        let set_mode = |mode| {
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(mode)).unwrap()
+        };
+        set_mode(0o555);
+        let result = apply_fixes_to_file(&file, &[Fix::single(7, 21, ".sample")]);
+        set_mode(0o755);
+
+        // Root ignores directory permissions, so there the write succeeds instead. Either way
+        // no temp file is left behind.
+        let expected = if result.is_ok() {
+            "x = [1].sample"
+        } else {
+            "x = [1].shuffle.first"
+        };
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), expected);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
     #[test]
     fn apply_fixes_to_file_syntax_error_skipped() {
         let dir = tempfile::TempDir::new().unwrap();

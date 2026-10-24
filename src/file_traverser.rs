@@ -90,15 +90,17 @@ impl Walk {
         if !self.seen.insert(real_dir.to_path_buf()) {
             return;
         }
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
-        entries.sort_by_key(|e| e.file_name());
-        for entry in entries {
-            let Ok(file_type) = entry.file_type() else {
-                continue;
-            };
+        // Unreadable directories and entries are skipped, as the glob walk did.
+        let mut entries: Vec<_> = std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| {
+                let entry = entry.ok()?;
+                Some((entry.file_type().ok()?, entry))
+            })
+            .collect();
+        entries.sort_by_key(|(_, entry)| entry.file_name());
+        for (file_type, entry) in entries {
             let path = entry.path();
             let (real, is_dir) = if file_type.is_symlink() {
                 match path.canonicalize() {
