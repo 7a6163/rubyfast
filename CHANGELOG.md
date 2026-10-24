@@ -21,6 +21,9 @@
     a key, and non-Hash receivers with a `keys` method may have no `each_key`
 - A file reachable through several symlinked paths is scanned and fixed once, instead
   of being fixed again with stale offsets
+- `getter_vs_attr_reader` and `setter_vs_attr_writer` no longer fire on methods with
+  optional, splat, keyword or block parameters, which `attr_reader`/`attr_writer` can't
+  replace
 - `(fixable)` and the "autocorrectable" count only include offenses `--fix` will actually
   fix, not every offense of a fixable rule (e.g. a `for` loop whose locals escape)
 

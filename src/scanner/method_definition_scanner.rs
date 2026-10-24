@@ -2,7 +2,7 @@ use ruby_prism::Node;
 
 use crate::ast_helpers::{
     body_expression_count, body_single_expression, def_block_arg_name, def_first_arg_name,
-    def_regular_arg_count,
+    def_regular_arg_count, only_required_params,
 };
 use crate::ast_visitor::for_each_node;
 use crate::offense::{Offense, OffenseKind};
@@ -59,8 +59,8 @@ fn check_getter_vs_attr_reader(def: &ruby_prism::DefNode<'_>, offenses: &mut Vec
     if def_name.ends_with('=') {
         return;
     }
-    // Must have 0 arguments
-    if def_regular_arg_count(def) != 0 {
+    // Must take no parameters at all: attr_reader can't accept any
+    if def.parameters().is_some() {
         return;
     }
     // Body must be a single ivar read matching @<method_name>
@@ -89,8 +89,10 @@ fn check_setter_vs_attr_writer(def: &ruby_prism::DefNode<'_>, offenses: &mut Vec
         Some(n) => n.to_string(),
         None => return,
     };
-    // Must have exactly 1 regular argument
-    if def_regular_arg_count(def) != 1 {
+    // Must take exactly 1 plain parameter: attr_writer can't accept more
+    if def_regular_arg_count(def) != 1
+        || !def.parameters().is_some_and(|p| only_required_params(&p))
+    {
         return;
     }
     let arg_name = match def_first_arg_name(def) {
@@ -208,6 +210,38 @@ mod tests {
     fn getter_with_args_no_fire() {
         let offenses = parse_and_scan(b"def name(x); @name; end");
         assert!(!has_kind(&offenses, OffenseKind::GetterVsAttrReader));
+    }
+
+    #[test]
+    fn getter_with_non_required_params_no_fire() {
+        for src in [
+            "def name(x = 1); @name; end",
+            "def name(*a); @name; end",
+            "def name(k: 1); @name; end",
+            "def name(&b); @name; end",
+        ] {
+            let offenses = parse_and_scan(src.as_bytes());
+            assert!(
+                !has_kind(&offenses, OffenseKind::GetterVsAttrReader),
+                "{src}"
+            );
+        }
+    }
+
+    #[test]
+    fn setter_with_extra_non_required_params_no_fire() {
+        for src in [
+            "def name=(v, w = 1); @name = v; end",
+            "def name=(v, *r); @name = v; end",
+            "def name=(v, k: 1); @name = v; end",
+            "def name=(v, &b); @name = v; end",
+        ] {
+            let offenses = parse_and_scan(src.as_bytes());
+            assert!(
+                !has_kind(&offenses, OffenseKind::SetterVsAttrWriter),
+                "{src}"
+            );
+        }
     }
 
     #[test]

@@ -177,6 +177,15 @@ code # rubyfast:disable shuffle_first_vs_sample, for_loop_vs_each
 code # fasterer:disable shuffle_first_vs_sample
 ```
 
+An offense is reported on the line where its expression starts, so for a chain split over
+several lines, put the comment on that first line or use `disable-next-line` above it:
+
+```ruby
+x = arr # rubyfast:disable shuffle_first_vs_sample
+  .shuffle
+  .first
+```
+
 ## Configuration
 
 Create a `.rubyfast.yml` (or `.fasterer.yml` for backwards compatibility) in your project root to disable specific checks or exclude files:

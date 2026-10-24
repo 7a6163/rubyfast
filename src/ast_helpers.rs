@@ -173,16 +173,21 @@ pub fn is_int_one(node: &Node<'_>) -> bool {
 /// `|x,|`, `|x, *r|`, `|x, y = 1|`, `|x, k:|`, `|x, &b|`, numbered params, etc. give None.
 pub fn sole_block_arg_name(params: &Option<Node<'_>>) -> Option<String> {
     let p = params.as_ref()?.as_block_parameters_node()?.parameters()?;
-    let only_required = p.optionals().iter().next().is_none()
+    let mut requireds = p.requireds().iter();
+    let first = requireds.next()?.as_required_parameter_node()?;
+    (only_required_params(&p) && requireds.next().is_none())
+        .then(|| String::from_utf8_lossy(first.name().as_slice()).into_owned())
+}
+
+/// Whether a parameter list holds nothing but plain required parameters: no optionals,
+/// splats, keywords or block parameter.
+pub fn only_required_params(p: &ruby_prism::ParametersNode<'_>) -> bool {
+    p.optionals().iter().next().is_none()
         && p.rest().is_none()
         && p.posts().iter().next().is_none()
         && p.keywords().iter().next().is_none()
         && p.keyword_rest().is_none()
-        && p.block().is_none();
-    let mut requireds = p.requireds().iter();
-    let first = requireds.next()?.as_required_parameter_node()?;
-    (only_required && requireds.next().is_none())
-        .then(|| String::from_utf8_lossy(first.name().as_slice()).into_owned())
+        && p.block().is_none()
 }
 
 /// Check if a DefNode has a block argument (&block), returning its name if so.
